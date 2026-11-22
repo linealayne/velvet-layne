@@ -173,8 +173,12 @@ export default function ColorField({
       let visible = true;
       let id = 0;
       const t0 = performance.now();
+      // The field moves slowly, so phones draw it on every other frame:
+      // half the GPU work and battery for a difference nobody can see.
+      let skip = false;
       const loop = (now: number) => {
-        draw((now - t0) / 1000 + 14);
+        skip = small && !skip;
+        if (!skip) draw((now - t0) / 1000 + 14);
         id = requestAnimationFrame(loop);
       };
       const sync = () => {

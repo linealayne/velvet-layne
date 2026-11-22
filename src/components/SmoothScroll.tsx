@@ -11,20 +11,26 @@ import { gsap, ScrollTrigger, scrollState, motionOn } from "@/lib/gsap";
  */
 export default function SmoothScroll() {
   useEffect(() => {
-    let lenis: Lenis | null = null;
-    let raf: ((time: number) => void) | null = null;
+    if (!motionOn()) return;
 
-    if (motionOn()) {
-      lenis = new Lenis({ lerp: 0.12, smoothWheel: true, anchors: true });
-      lenis.on("scroll", ScrollTrigger.update);
-      raf = (time: number) => lenis?.raf(time * 1000);
-      gsap.ticker.add(raf);
-      gsap.ticker.lagSmoothing(0);
-    }
+    // Layout changes are handled by the ResizeObserver below, so ScrollTrigger
+    // does not need to re-measure the whole page again on window load.
+    ScrollTrigger.config({ autoRefreshEvents: "visibilitychange" });
 
-    let last = window.scrollY;
+    const lenis = new Lenis({ lerp: 0.12, smoothWheel: true, anchors: true });
+    lenis.on("scroll", ScrollTrigger.update);
+    const raf = (time: number) => lenis.raf(time * 1000);
+    gsap.ticker.add(raf);
+    gsap.ticker.lagSmoothing(0);
+
+    // Velocity comes from scroll events, so an idle page never reads layout.
+    let y = window.scrollY;
+    let last = y;
+    const onScroll = () => {
+      y = window.scrollY;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
     const track = (_t: number, deltaMs: number) => {
-      const y = window.scrollY;
       const dt = Math.max(deltaMs, 1) / 1000;
       const v = (y - last) / dt;
       last = y;
@@ -33,14 +39,17 @@ export default function SmoothScroll() {
     };
     gsap.ticker.add(track);
 
-    const refresh = () => ScrollTrigger.refresh();
-
     // Chapters below the fold use content-visibility, so their real height is
     // only known once they come near. Re-measure the triggers when that happens.
     let settle = 0;
+    let first = true;
     const ro = new ResizeObserver(() => {
+      if (first) {
+        first = false;
+        return;
+      }
       window.clearTimeout(settle);
-      settle = window.setTimeout(refresh, 120);
+      settle = window.setTimeout(() => ScrollTrigger.refresh(), 120);
     });
     const main = document.querySelector("main");
     if (main) ro.observe(main);
@@ -48,9 +57,10 @@ export default function SmoothScroll() {
     return () => {
       ro.disconnect();
       window.clearTimeout(settle);
+      window.removeEventListener("scroll", onScroll);
       gsap.ticker.remove(track);
-      if (raf) gsap.ticker.remove(raf);
-      lenis?.destroy();
+      gsap.ticker.remove(raf);
+      lenis.destroy();
     };
   }, []);
 
