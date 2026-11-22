@@ -13,13 +13,27 @@ import {
   isSmall,
 } from "@/lib/gsap";
 
-const LINES = ["Color has a pulse", "Type has a temper", "Nothing here sits still"];
+const LINES = [
+  "Color has a pulse",
+  "Type has a temper",
+  "Nothing here sits still",
+];
 
-function Letters({ text }: { text: string }) {
+function Letters({ text, delay }: { text: string; delay?: number }) {
   return (
     <>
       {text.split("").map((c, i) => (
-        <span key={i} className="ch">
+        <span
+          key={i}
+          className="ch"
+          style={
+            delay === undefined
+              ? undefined
+              : ({
+                  "--d": (delay + i * 0.07).toFixed(2),
+                } as React.CSSProperties)
+          }
+        >
           {c}
         </span>
       ))}
@@ -54,28 +68,8 @@ export default function Act1() {
       const coarse = isCoarse();
       const small = isSmall();
 
-      // 1. The name arrives: letters slice in from above and below.
-      gsap
-        .timeline({ defaults: { ease: "expo.out" } })
-        .set(".name", { visibility: "visible" })
-        .to(".intro-black", { opacity: 0, duration: 2.4, ease: "power2.inOut" }, 0.1)
-        .from(
-          ".name-velvet .ch",
-          { yPercent: (i) => (i % 2 ? 120 : -120), duration: 1.3, stagger: 0.07 },
-          0.25
-        )
-        .from(
-          ".name-layne .ch",
-          { yPercent: (i) => (i % 2 ? -120 : 120), duration: 1.3, stagger: 0.07 },
-          0.95
-        )
-        .fromTo(
-          ".tagline",
-          { opacity: 0, y: 14 },
-          { opacity: 1, y: 0, duration: 1.1 },
-          1.8
-        )
-        .fromTo(".cue", { opacity: 0 }, { opacity: 1, duration: 1.2 }, 2.2);
+      // 1. The name arrives with CSS keyframes (see globals.css) so it does not
+      //    wait for JavaScript. GSAP takes over from the first scroll.
 
       // 2. Scroll: the name parts like a curtain and the field blooms open.
       gsap
@@ -142,7 +136,9 @@ export default function Act1() {
         const vel = scrollState.velocity;
         const stretch = 1 + Math.min(Math.abs(vel) / 2800, 0.5);
         const skew = gsap.utils.clamp(-12, 12, vel / 170);
-        const cx = coarse ? vw * (0.5 + 0.45 * Math.sin(time * 0.9)) : pointer.x;
+        const cx = coarse
+          ? vw * (0.5 + 0.45 * Math.sin(time * 0.9))
+          : pointer.x;
         const cy = coarse ? vh * 0.5 : pointer.y;
         const radius = Math.max(190, vw * 0.26);
 
@@ -163,7 +159,10 @@ export default function Act1() {
           line.inner.style.transform = `skewX(${(-skew).toFixed(2)}deg) scaleY(${stretch.toFixed(3)})`;
           line.chars.forEach((c, i) => {
             const r = read.rects[i];
-            const d = Math.hypot(r.left + r.width / 2 - cx, r.top + r.height / 2 - cy);
+            const d = Math.hypot(
+              r.left + r.width / 2 - cx,
+              r.top + r.height / 2 - cy,
+            );
             const fall = Math.max(0, 1 - d / radius) ** 1.5;
             const wdth = Math.round(wMin + (wMax - wMin) * fall);
             const wght = Math.round((base + (900 - base) * fall) / 10) * 10;
@@ -182,7 +181,7 @@ export default function Act1() {
         window.removeEventListener("pointermove", onMove);
       };
     },
-    { scope: root }
+    { scope: root },
   );
 
   return (
@@ -198,10 +197,10 @@ export default function Act1() {
           <div className="name-scale">
             <h1 className="name" aria-label="Velvet Layne">
               <span className="name-line name-velvet" aria-hidden="true">
-                <Letters text="VELVET" />
+                <Letters text="VELVET" delay={0.2} />
               </span>
               <span className="name-line name-layne" aria-hidden="true">
-                <Letters text="LAYNE" />
+                <Letters text="LAYNE" delay={0.85} />
               </span>
             </h1>
           </div>
@@ -218,7 +217,8 @@ export default function Act1() {
       <section className="living" data-chapter="2" data-name="Living color">
         <h2 className="sr-only">Living color</h2>
         {LINES.map((text, i) => (
-          <p key={text} className={`lline lline-${i + 1}`} aria-label={text}>
+          <p key={text} className={`lline lline-${i + 1}`}>
+            <span className="sr-only">{text}</span>
             <span className="lline-in" aria-hidden="true">
               <Words text={text} />
             </span>
@@ -226,8 +226,8 @@ export default function Act1() {
         ))}
         <p className="living-note">
           Move through the letters. Scroll faster. From here down the style
-          changes completely with every chapter, and all of it was designed
-          and built for this page.
+          changes completely with every chapter, and all of it was designed and
+          built for this page.
         </p>
       </section>
 

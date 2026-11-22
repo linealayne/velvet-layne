@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { gsap, useGSAP, motionOn } from "@/lib/gsap";
+import { gsap, useStage, motionOn } from "@/lib/gsap";
 
 const INK = "#0e0e0e";
 const RED = "#e3120b";
@@ -99,7 +99,7 @@ const REVEAL_FROM = [
 export default function Editorial() {
   const root = useRef<HTMLElement>(null);
 
-  useGSAP(
+  useStage(
     () => {
       if (!motionOn()) return;
 
@@ -139,7 +139,8 @@ export default function Editorial() {
         );
       });
     },
-    { scope: root }
+    root,
+    4
   );
 
   return (

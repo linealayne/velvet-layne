@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ScrollTrigger, useGSAP, motionOn } from "@/lib/gsap";
+import { ScrollTrigger, useStage, motionOn } from "@/lib/gsap";
 
 const NOT_USED = [
   "A page builder",
@@ -25,7 +25,7 @@ export default function Brutal() {
   const root = useRef<HTMLElement>(null);
   const [pressed, setPressed] = useState(false);
 
-  useGSAP(
+  useStage(
     () => {
       if (!motionOn()) return;
       const el = root.current!;
@@ -50,7 +50,8 @@ export default function Brutal() {
           }),
       });
     },
-    { scope: root }
+    root,
+    8
   );
 
   return (

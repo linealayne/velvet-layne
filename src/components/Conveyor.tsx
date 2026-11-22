@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { gsap, ScrollTrigger, useGSAP, scrollState, motionOn } from "@/lib/gsap";
+import { gsap, ScrollTrigger, useStage, scrollState, motionOn } from "@/lib/gsap";
 
 type Item =
   | { k: "swatch"; name: string; hex: string }
@@ -190,7 +190,7 @@ function Card({ item }: { item: Item }) {
 export default function Conveyor() {
   const root = useRef<HTMLElement>(null);
 
-  useGSAP(
+  useStage(
     () => {
       if (!motionOn()) return;
       const el = root.current!;
@@ -280,7 +280,8 @@ export default function Conveyor() {
         cleanups.forEach((fn) => fn());
       };
     },
-    { scope: root }
+    root,
+    2
   );
 
   return (

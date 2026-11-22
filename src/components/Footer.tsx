@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { gsap, ScrollTrigger, useGSAP, motionOn, isCoarse } from "@/lib/gsap";
+import { gsap, ScrollTrigger, useStage, motionOn, isCoarse } from "@/lib/gsap";
 
 // The tracer alphabet: twelve marks drawn for this page. V and L for the name,
 // a single stroke for Linea ("line"), then a drop, a spark and friends.
@@ -23,7 +23,7 @@ const MARKS: { color: string; d: string; fill?: boolean }[] = [
 export default function Footer() {
   const root = useRef<HTMLElement>(null);
 
-  useGSAP(
+  useStage(
     () => {
       if (!motionOn()) return;
       const el = root.current!;
@@ -114,7 +114,8 @@ export default function Footer() {
         el.removeEventListener("touchmove", onTouch);
       };
     },
-    { scope: root }
+    root,
+    10
   );
 
   return (

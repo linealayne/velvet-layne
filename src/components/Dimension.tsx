@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { gsap, useGSAP, motionOn } from "@/lib/gsap";
+import { gsap, useStage, motionOn } from "@/lib/gsap";
 
 // three.js is only downloaded when this chapter is about to come on screen.
 const Sculpture = dynamic(() => import("./Sculpture"), { ssr: false });
@@ -25,7 +25,7 @@ export default function Dimension() {
     return () => io.disconnect();
   }, []);
 
-  useGSAP(
+  useStage(
     () => {
       if (!motionOn()) return;
       gsap
@@ -42,7 +42,8 @@ export default function Dimension() {
         .fromTo(".dim-b", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.2 }, 0.58)
         .to({}, { duration: 0.22 });
     },
-    { scope: root }
+    root,
+    6
   );
 
   return (

@@ -75,108 +75,133 @@ export default function ColorField({
 
   useEffect(() => {
     const canvas = ref.current!;
-    const gl = canvas.getContext("webgl", {
-      antialias: false,
-      alpha: false,
-      powerPreference: "high-performance",
-    });
-    if (!gl) {
-      canvas.style.display = "none";
-      return;
-    }
     const small = isSmall();
     const animate = motionOn();
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    let waitId = 0;
 
-    const make = (type: number, src: string) => {
-      const s = gl.createShader(type)!;
-      gl.shaderSource(s, src);
-      gl.compileShader(s);
-      return s;
-    };
-    const prog = gl.createProgram()!;
-    gl.attachShader(prog, make(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(prog, make(gl.FRAGMENT_SHADER, frag(small ? 4 : 5)));
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      canvas.style.display = "none";
-      return;
-    }
-    gl.useProgram(prog);
-    const buf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([-1, -1, 3, -1, -1, 3]),
-      gl.STATIC_DRAW
-    );
-    const loc = gl.getAttribLocation(prog, "p");
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-
-    const u = {
-      res: gl.getUniformLocation(prog, "uRes"),
-      time: gl.getUniformLocation(prog, "uTime"),
-      mouse: gl.getUniformLocation(prog, "uMouse"),
-      bloom: gl.getUniformLocation(prog, "uBloom"),
-      hue: gl.getUniformLocation(prog, "uHue"),
-    };
-
-    let mx = 0.5;
-    let my = 0.5;
-    const draw = (seconds: number) => {
-      const s = state.current;
-      mx += (s.mx - mx) * 0.06;
-      my += (s.my - my) * 0.06;
-      gl.uniform2f(u.res, canvas.width, canvas.height);
-      gl.uniform1f(u.time, seconds);
-      gl.uniform2f(u.mouse, mx, my);
-      gl.uniform1f(u.bloom, animate ? s.bloom : 0.55);
-      gl.uniform1f(u.hue, s.hue);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    };
-
-    const resize = () => {
-      if (!canvas.clientWidth) return;
-      const scale = small ? 0.42 : 0.5;
-      const w = Math.min(Math.round(canvas.clientWidth * scale), 1100);
-      const h = Math.round((w / canvas.clientWidth) * canvas.clientHeight);
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-        gl.viewport(0, 0, w, h);
+    // Everything GL happens off the hydration task, and the shader is compiled
+    // in parallel where the browser supports it, so the page never blocks on it.
+    const bootId = window.setTimeout(() => {
+      const gl = canvas.getContext("webgl", {
+        antialias: false,
+        alpha: false,
+        powerPreference: "high-performance",
+      });
+      if (!gl) {
+        canvas.style.display = "none";
+        return;
       }
-      if (!animate) draw(14);
-    };
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
+      const make = (type: number, src: string) => {
+        const s = gl.createShader(type)!;
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        return s;
+      };
+      const prog = gl.createProgram()!;
+      gl.attachShader(prog, make(gl.VERTEX_SHADER, VERT));
+      gl.attachShader(prog, make(gl.FRAGMENT_SHADER, frag(small ? 4 : 5)));
+      gl.linkProgram(prog);
 
-    if (!animate) return () => ro.disconnect();
+      const parallel = gl.getExtension("KHR_parallel_shader_compile");
+      const wait = () => {
+        if (disposed) return;
+        if (parallel && !gl.getProgramParameter(prog, parallel.COMPLETION_STATUS_KHR)) {
+          waitId = requestAnimationFrame(wait);
+          return;
+        }
+        cleanup = start(gl, prog);
+      };
+      wait();
+    }, 0);
 
-    let visible = true;
-    let id = 0;
-    const start = performance.now();
-    const loop = (now: number) => {
-      draw((now - start) / 1000 + 14);
-      id = requestAnimationFrame(loop);
-    };
-    const sync = () => {
-      cancelAnimationFrame(id);
-      if (visible && !document.hidden) id = requestAnimationFrame(loop);
-    };
-    const io = new IntersectionObserver(([entry]) => {
-      visible = entry.isIntersecting;
+    function start(gl: WebGLRenderingContext, prog: WebGLProgram) {
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        canvas.style.display = "none";
+        return undefined;
+      }
+      gl.useProgram(prog);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(prog, "p");
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+      const u = {
+        res: gl.getUniformLocation(prog, "uRes"),
+        time: gl.getUniformLocation(prog, "uTime"),
+        mouse: gl.getUniformLocation(prog, "uMouse"),
+        bloom: gl.getUniformLocation(prog, "uBloom"),
+        hue: gl.getUniformLocation(prog, "uHue"),
+      };
+
+      let mx = 0.5;
+      let my = 0.5;
+      const draw = (seconds: number) => {
+        const s = state.current;
+        mx += (s.mx - mx) * 0.06;
+        my += (s.my - my) * 0.06;
+        gl.uniform2f(u.res, canvas.width, canvas.height);
+        gl.uniform1f(u.time, seconds);
+        gl.uniform2f(u.mouse, mx, my);
+        gl.uniform1f(u.bloom, animate ? s.bloom : 0.55);
+        gl.uniform1f(u.hue, s.hue);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+
+      const resize = () => {
+        if (!canvas.clientWidth) return;
+        const scale = small ? 0.42 : 0.5;
+        const w = Math.min(Math.round(canvas.clientWidth * scale), 1100);
+        const h = Math.round((w / canvas.clientWidth) * canvas.clientHeight);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+          gl.viewport(0, 0, w, h);
+        }
+        if (!animate) draw(14);
+      };
+      resize();
+      const ro = new ResizeObserver(resize);
+      ro.observe(canvas);
+      canvas.classList.add("is-live");
+
+      if (!animate) return () => ro.disconnect();
+
+      let visible = true;
+      let id = 0;
+      const t0 = performance.now();
+      const loop = (now: number) => {
+        draw((now - t0) / 1000 + 14);
+        id = requestAnimationFrame(loop);
+      };
+      const sync = () => {
+        cancelAnimationFrame(id);
+        if (visible && !document.hidden) id = requestAnimationFrame(loop);
+      };
+      const io = new IntersectionObserver(([entry]) => {
+        visible = entry.isIntersecting;
+        sync();
+      });
+      io.observe(canvas);
+      document.addEventListener("visibilitychange", sync);
       sync();
-    });
-    io.observe(canvas);
-    document.addEventListener("visibilitychange", sync);
-    sync();
+
+      return () => {
+        cancelAnimationFrame(id);
+        io.disconnect();
+        ro.disconnect();
+        document.removeEventListener("visibilitychange", sync);
+      };
+    }
 
     return () => {
-      cancelAnimationFrame(id);
-      io.disconnect();
-      ro.disconnect();
-      document.removeEventListener("visibilitychange", sync);
+      disposed = true;
+      window.clearTimeout(bootId);
+      cancelAnimationFrame(waitId);
+      cleanup?.();
     };
   }, [state]);
 

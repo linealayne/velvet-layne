@@ -34,10 +34,22 @@ export default function SmoothScroll() {
     gsap.ticker.add(track);
 
     const refresh = () => ScrollTrigger.refresh();
+
+    // Chapters below the fold use content-visibility, so their real height is
+    // only known once they come near. Re-measure the triggers when that happens.
+    let settle = 0;
+    const ro = new ResizeObserver(() => {
+      window.clearTimeout(settle);
+      settle = window.setTimeout(refresh, 120);
+    });
+    const main = document.querySelector("main");
+    if (main) ro.observe(main);
     document.fonts?.ready.then(refresh);
     window.addEventListener("load", refresh);
 
     return () => {
+      ro.disconnect();
+      window.clearTimeout(settle);
       gsap.ticker.remove(track);
       if (raf) gsap.ticker.remove(raf);
       window.removeEventListener("load", refresh);

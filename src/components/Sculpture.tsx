@@ -145,6 +145,8 @@ export default function Sculpture() {
     let impulse = 0;
     let progress = animate ? 0 : 0.35;
     let time = 2;
+    let ready = false;
+    let disposed = false;
 
     const frame = (dt: number) => {
       time += dt;
@@ -173,7 +175,7 @@ export default function Sculpture() {
         bead.position.set(Math.cos(a) * 1.9, Math.sin(a * 1.3) * 0.7, Math.sin(a) * 1.9);
       }
       camera.position.z = (aspect > 1.1 ? 8.2 : 9.6) - Math.sin(p * Math.PI) * 1.4;
-      renderer.render(scene, camera);
+      if (ready) renderer.render(scene, camera);
     };
 
     const resize = () => {
@@ -189,7 +191,16 @@ export default function Sculpture() {
     ro.observe(host);
     resize();
 
+    // Compile the materials off the main thread, then show the first frame.
+    renderer.compileAsync(scene, camera).then(() => {
+      if (disposed) return;
+      ready = true;
+      host.classList.add("is-live");
+      if (!animate) frame(0);
+    });
+
     const dispose = () => {
+      disposed = true;
       ro.disconnect();
       disposables.forEach((d) => d.dispose());
       env.dispose();

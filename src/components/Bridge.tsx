@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { gsap, ScrollTrigger, useGSAP, motionOn } from "@/lib/gsap";
+import { gsap, ScrollTrigger, useStage, motionOn } from "@/lib/gsap";
 
 export type BridgeVariant = "sweep" | "columns" | "iris" | "tiles" | "hinge";
 
@@ -30,7 +30,7 @@ export default function Bridge({
 }) {
   const root = useRef<HTMLDivElement>(null);
 
-  useGSAP(
+  useStage(
     () => {
       if (!motionOn()) return;
       const el = root.current!;
@@ -44,7 +44,9 @@ export default function Bridge({
       if (variant === "tiles") {
         const tiles = q(".tile") as HTMLElement[];
         const card = q(".card")[0] as HTMLElement;
-        const thr = tiles.map((_, i) => 0.06 + (((i * 17) % TILES) / TILES) * 0.66);
+        const thr = tiles.map(
+          (_, i) => 0.06 + (((i * 17) % TILES) / TILES) * 0.66,
+        );
         let lastStep = -1;
         ScrollTrigger.create({
           ...st,
@@ -55,8 +57,7 @@ export default function Bridge({
             lastStep = step;
             tiles.forEach((t, i) => {
               const on = p > thr[i];
-              const flicker =
-                !on && p > thr[i] - 0.07 && (step + i) % 2 === 0;
+              const flicker = !on && p > thr[i] - 0.07 && (step + i) % 2 === 0;
               t.style.opacity = on || flicker ? "1" : "0";
               t.style.backgroundColor = flicker ? "#0019ff" : "";
             });
@@ -76,12 +77,12 @@ export default function Bridge({
           q(".sw"),
           { "--x": 128 },
           { "--x": 0, duration: 0.6, stagger: 0.085, ease: "power2.inOut" },
-          0
+          0,
         ).fromTo(
           q(".card"),
           { xPercent: 45, opacity: 0 },
           { xPercent: 0, opacity: 1, duration: 0.38, ease: "power3.out" },
-          0.42
+          0.42,
         );
       } else if (variant === "columns") {
         tl.fromTo(
@@ -93,31 +94,33 @@ export default function Bridge({
             ease: "power3.inOut",
             stagger: { each: 0.06, from: "edges" },
           },
-          0
-        ).fromTo(
-          q(".mask > *"),
-          { yPercent: 115 },
-          { yPercent: 0, duration: 0.3, ease: "power3.out", stagger: 0.07 },
-          0.55
-        );
+          0,
+        )
+          .set(q(".card"), { visibility: "visible" }, 0.5)
+          .fromTo(
+            q(".mask > *"),
+            { yPercent: 115 },
+            { yPercent: 0, duration: 0.3, ease: "power3.out", stagger: 0.07 },
+            0.55,
+          );
       } else if (variant === "iris") {
         tl.fromTo(
           q(".iris-red"),
           { "--r": 1.1 },
           { "--r": 78, duration: 0.48, ease: "power2.in" },
-          0.04
+          0.04,
         )
           .fromTo(
             q(".b-to"),
             { "--r": 0 },
             { "--r": 78, duration: 0.42, ease: "power2.inOut" },
-            0.4
+            0.4,
           )
           .fromTo(
             q(".card"),
             { opacity: 0, scale: 0.86 },
             { opacity: 1, scale: 1, duration: 0.25, ease: "power2.out" },
-            0.66
+            0.66,
           );
       } else if (variant === "hinge") {
         tl.to(
@@ -128,17 +131,18 @@ export default function Bridge({
             ease: "power2.in",
             transformOrigin: "0% 0%",
           },
-          0.04
+          0.04,
         ).fromTo(
           q(".card"),
           { opacity: 0, y: 40 },
           { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" },
-          0.55
+          0.55,
         );
       }
       tl.to({}, { duration: 0.1 });
     },
-    { scope: root }
+    root,
+    index * 2 - 5,
   );
 
   return (
@@ -171,9 +175,7 @@ export default function Bridge({
           )}
           <div className="card">
             <div className="mask">
-              <p className="card-n">
-                {index} / 7
-              </p>
+              <p className="card-n">{index} / 7</p>
             </div>
             <div className="mask">
               <p className="card-t">{title}</p>
