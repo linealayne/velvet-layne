@@ -77,7 +77,7 @@ for (const run of RUNS) {
 
   await snap("01-intro", 0, { wait: 300 });
   if (!run.reduced) await snap("01b-intro-to-living", mid(g.intro, 0.55));
-  await snap("02-living-a", g.living.top + g.vh * 0.05, { mouse: [run.width * 0.4, run.height * 0.45] });
+  await snap("02-living-a", g.living.top + g.vh * 0.05, { mouse: [run.width * 0.3, run.height * 0.3] });
   await snap("02-living-b", g.living.top + g.living.height * 0.5, { mouse: [run.width * 0.6, run.height * 0.5] });
   if (!run.reduced) await snap("03a-sweep-mid", mid(g.sweep, 0.48));
   await snap("03-conveyor-title", mid(g.sweep, 1));
