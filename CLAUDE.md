@@ -31,12 +31,15 @@ npm run dev          # local dev
 npm run build        # production build (must stay clean)
 npm run lint         # eslint (must stay clean)
 bash scripts/serve.sh                       # rebuild + serve on :3210
-node scripts/shots.mjs [url] [outDir] [filter]   # Playwright screenshots
+node scripts/shots.mjs [url] [outDir] [filter] [jpeg]   # Playwright screenshots
+node scripts/og.mjs [url]                   # regenerate src/app/opengraph-image.png
 ```
 
 `scripts/shots.mjs` uses `playwright-core` with the installed Chrome. It
 captures every chapter and every transition mid-motion at 1440 and 390, plus
-reduced motion, and prints horizontal overflow and console errors.
+reduced motion, and prints horizontal overflow and console errors. Pass a
+filter of `1024`, `768` or `375` for the other widths. The committed set from
+the live site is in `screenshots/`.
 
 ## The show (in scroll order)
 
@@ -72,6 +75,27 @@ gated on that class: CSS under `html.anim ...`, JS behind `motionOn()` from
 `src/lib/gsap.ts`. Without the class (reduced motion or no JS) the page is the
 static show: bridges collapse to title panels, belts become scrollable rows,
 the shader and the 3D object render a single frame.
+
+## Performance notes (keep these intact)
+
+- The intro (name, tagline, scroll cue) is animated with CSS keyframes, not
+  JS, so the largest paint does not wait for hydration.
+- Chapter setup uses `useStage()` from `src/lib/gsap.ts`: like `useGSAP`, but
+  each chapter initialises in its own task a few ms apart instead of one long
+  task at load. Only `Act1` uses `useGSAP` directly.
+- Both WebGL scenes compile shaders asynchronously
+  (`KHR_parallel_shader_compile` / `renderer.compileAsync`). Never read
+  `LINK_STATUS` straight after linking; it blocks the main thread.
+- The 3D scene builds in small steps and waits for the scroll to be at rest
+  before the GPU-heavy ones (`calm()` in `Sculpture.tsx`). It has no
+  transmission material on purpose: the refraction pass cost a visible stall.
+- Chapters below the fold use `content-visibility: auto`. Their real height is
+  only known once they are near, so `SmoothScroll.tsx` re-runs
+  `ScrollTrigger.refresh()` when `<main>` changes size.
+- Every loop (shader, belts, type, tracers, 3D) stops when its chapter is off
+  screen or the tab is hidden.
+- Measured on the live site: Lighthouse mobile performance 90 to 91,
+  accessibility 100; 60fps while scrolling on Intel Iris Xe integrated graphics.
 
 Bridges use CSS `position: sticky`, not ScrollTrigger pinning, so there is no
 pin spacing to get wrong and scroll is never hijacked.

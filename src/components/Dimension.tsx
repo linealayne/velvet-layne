@@ -19,7 +19,7 @@ export default function Dimension() {
           io.disconnect();
         }
       },
-      { rootMargin: "150% 0px" }
+      { rootMargin: "320% 0px" }
     );
     io.observe(root.current!);
     return () => io.disconnect();

@@ -26,6 +26,7 @@ const description =
   "Velvet Layne is a design showcase by Layne at Linea: one long scroll that changes style completely, chapter by chapter.";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://velvet-layne.vercel.app"),
   title: "Velvet Layne, a design showcase by Layne at Linea",
   description,
   openGraph: {
