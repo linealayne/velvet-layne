@@ -102,8 +102,11 @@ the shader and the 3D object render a single frame.
   `ScrollTrigger.refresh()` when `<main>` changes size.
 - Every loop (shader, belts, type, tracers, 3D) stops when its chapter is off
   screen or the tab is hidden.
-- Measured on the live site: Lighthouse mobile performance 90 to 91,
-  accessibility 100; 60fps while scrolling on Intel Iris Xe integrated graphics.
+- Measured on the live site (2026-11-22): Lighthouse mobile performance 88 to
+  97 across eight runs, median 94; accessibility, best practices and SEO 100;
+  60fps while scrolling on Intel Iris Xe integrated graphics. Lighthouse run
+  on a busy laptop swings a lot: check `benchmarkIndex` in the report and
+  re-run before trusting a low score.
 
 Bridges use CSS `position: sticky`, not ScrollTrigger pinning, so there is no
 pin spacing to get wrong and scroll is never hijacked.
