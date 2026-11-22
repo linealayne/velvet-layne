@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import SmoothScroll from "@/components/SmoothScroll";
 import Cursor from "@/components/Cursor";
 import Hud from "@/components/Hud";
@@ -9,6 +10,9 @@ import Dimension from "@/components/Dimension";
 import Brutal from "@/components/Brutal";
 import Footer from "@/components/Footer";
 
+// Nothing below suspends. Each boundary exists so React hydrates that chapter
+// in its own interruptible pass instead of hydrating the whole page in one
+// long task. The HTML is already complete from the server either way.
 export default function Home() {
   return (
     <>
@@ -16,17 +20,31 @@ export default function Home() {
       <Cursor />
       <Hud />
       <main>
-        <Act1 />
-        <Conveyor />
-        <Bridge variant="columns" index={4} title="Editorial" />
-        <Editorial />
-        <Bridge variant="iris" index={5} title="Dimension" />
-        <Dimension />
-        <Bridge variant="tiles" index={6} title="Brutal" />
-        <Brutal />
-        <Bridge variant="hinge" index={7} title="Tracers" />
+        <Suspense>
+          <Act1 />
+        </Suspense>
+        <Suspense>
+          <Conveyor />
+        </Suspense>
+        <Suspense>
+          <Bridge variant="columns" index={4} title="Editorial" />
+          <Editorial />
+        </Suspense>
+        <Suspense>
+          <Bridge variant="iris" index={5} title="Dimension" />
+          <Dimension />
+        </Suspense>
+        <Suspense>
+          <Bridge variant="tiles" index={6} title="Brutal" />
+          <Brutal />
+        </Suspense>
+        <Suspense>
+          <Bridge variant="hinge" index={7} title="Tracers" />
+        </Suspense>
       </main>
-      <Footer />
+      <Suspense>
+        <Footer />
+      </Suspense>
     </>
   );
 }

@@ -26,29 +26,51 @@ export const isSmall = () =>
   window.matchMedia("(max-width: 820px)").matches;
 
 /**
- * Like useGSAP, but the setup runs in its own task a moment after hydration.
- * Each chapter gets a different slot so start-up work is spread out instead of
- * landing in one long task. Selectors are scoped to the given element; everything is
- * reverted on unmount.
+ * Like useGSAP, but the setup is deferred so start-up work never lands in one
+ * long task:
+ *   "near" (default) runs when the element comes within about a screen of the
+ *          viewport. Chapters below the fold use content-visibility, and
+ *          measuring inside them early would force the browser to lay them out
+ *          at load, which is exactly the work we are trying to postpone.
+ *   "soon" runs in its own task right after hydration (for the first screen).
+ * Selectors are scoped to the element; everything is reverted on unmount.
  */
 export function useStage(
   setup: () => void | (() => void),
   scope: RefObject<HTMLElement | null>,
-  order = 1
+  when: "near" | "soon" = "near"
 ) {
   const saved = useRef(setup);
   useEffect(() => {
+    const el = scope.current;
+    if (!el) return;
     let ctx: gsap.Context | undefined;
     let cleanup: void | (() => void);
-    const id = window.setTimeout(() => {
+    let timer = 0;
+    let io: IntersectionObserver | undefined;
+    const run = () => {
       ctx = gsap.context(() => {
         cleanup = saved.current();
-      }, scope.current ?? undefined);
-    }, 45 * order);
+      }, el);
+    };
+    if (when === "soon") {
+      timer = window.setTimeout(run, 30);
+    } else {
+      io = new IntersectionObserver(
+        ([entry]) => {
+          if (!entry.isIntersecting) return;
+          io?.disconnect();
+          timer = window.setTimeout(run, 0);
+        },
+        { rootMargin: "130% 0px" }
+      );
+      io.observe(el);
+    }
     return () => {
-      window.clearTimeout(id);
+      io?.disconnect();
+      window.clearTimeout(timer);
       if (cleanup) cleanup();
       ctx?.revert();
     };
-  }, [scope, order]);
+  }, [scope, when]);
 }

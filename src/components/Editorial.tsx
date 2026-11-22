@@ -2,69 +2,7 @@
 
 import { useRef } from "react";
 import { gsap, useStage, motionOn } from "@/lib/gsap";
-
-const INK = "#0e0e0e";
-const RED = "#e3120b";
-const PAPER = "#efefea";
-const BLUE = "#1c2bff";
-
-/** Four abstract plates, composed as SVG. No photographs anywhere. */
-function Plate({ n }: { n: number }) {
-  if (n === 1)
-    return (
-      <svg viewBox="0 0 400 500" role="img" aria-label="Plate 1: a black disc set off-centre on a red field, ringed by fine white circles" preserveAspectRatio="xMidYMid slice">
-        <rect width="400" height="500" fill={RED} />
-        <circle cx="250" cy="300" r="170" fill={INK} />
-        {[60, 100, 140, 180, 220, 260].map((r) => (
-          <circle key={r} cx="130" cy="170" r={r} fill="none" stroke={PAPER} strokeWidth="1.2" />
-        ))}
-        <circle cx="130" cy="170" r="20" fill={PAPER} />
-      </svg>
-    );
-  if (n === 2)
-    return (
-      <svg viewBox="0 0 400 500" role="img" aria-label="Plate 2: a halftone grid of pale dots growing larger toward one corner of a black field" preserveAspectRatio="xMidYMid slice">
-        <rect width="400" height="500" fill={INK} />
-        {Array.from({ length: 12 }, (_, y) =>
-          Array.from({ length: 10 }, (_, x) => (
-            <circle
-              key={`${x}-${y}`}
-              cx={20 + x * 40}
-              cy={30 + y * 40}
-              r={1.5 + ((x + (11 - y)) / 20) ** 1.8 * 19}
-              fill={x === 7 && y === 3 ? RED : PAPER}
-            />
-          ))
-        )}
-      </svg>
-    );
-  if (n === 3)
-    return (
-      <svg viewBox="0 0 400 500" role="img" aria-label="Plate 3: half discs in red, black and blue stacked like a totem" preserveAspectRatio="xMidYMid slice">
-        <rect width="400" height="500" fill="#dcdcd4" />
-        <path d="M60 170a140 140 0 0 1 280 0z" fill={RED} />
-        <path d="M60 170a140 140 0 0 0 280 0z" fill={INK} />
-        <path d="M60 450a140 140 0 0 1 280 0z" fill={BLUE} />
-        <rect x="60" y="450" width="280" height="6" fill={INK} />
-      </svg>
-    );
-  return (
-    <svg viewBox="0 0 400 500" role="img" aria-label="Plate 4: diagonal black stripes cut by a large quarter circle that fades from red to orange" preserveAspectRatio="xMidYMid slice">
-      <defs>
-        <pattern id="pl-stripes" width="28" height="28" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
-          <rect width="14" height="28" fill={INK} />
-        </pattern>
-        <linearGradient id="pl-fade" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0" stopColor={RED} />
-          <stop offset="1" stopColor="#ff8a1c" />
-        </linearGradient>
-      </defs>
-      <rect width="400" height="500" fill={PAPER} />
-      <rect width="400" height="500" fill="url(#pl-stripes)" />
-      <path d="M0 500V140a360 360 0 0 1 360 360z" fill="url(#pl-fade)" />
-    </svg>
-  );
-}
+import { plateArt } from "@/lib/art";
 
 const STEPS = [
   {
@@ -139,8 +77,7 @@ export default function Editorial() {
         );
       });
     },
-    root,
-    4
+    root
   );
 
   return (
@@ -173,9 +110,7 @@ export default function Editorial() {
               <p>{step.text}</p>
             </div>
             <figure className="ed-figure">
-              <div className="plate">
-                <Plate n={i + 1} />
-              </div>
+              <div className="plate" dangerouslySetInnerHTML={{ __html: plateArt(i + 1) }} />
               <figcaption>{step.caption}</figcaption>
             </figure>
           </li>

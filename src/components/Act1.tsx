@@ -6,7 +6,7 @@ import Bridge from "./Bridge";
 import {
   gsap,
   ScrollTrigger,
-  useGSAP,
+  useStage,
   scrollState,
   motionOn,
   isCoarse,
@@ -61,7 +61,7 @@ export default function Act1() {
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<FieldState>({ bloom: 0, hue: 0, mx: 0.5, my: 0.5 });
 
-  useGSAP(
+  useStage(
     () => {
       if (!motionOn()) return;
       const state = field.current;
@@ -181,7 +181,8 @@ export default function Act1() {
         window.removeEventListener("pointermove", onMove);
       };
     },
-    { scope: root },
+    root,
+    "soon",
   );
 
   return (

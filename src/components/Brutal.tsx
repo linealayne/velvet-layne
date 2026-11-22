@@ -50,8 +50,7 @@ export default function Brutal() {
           }),
       });
     },
-    root,
-    8
+    root
   );
 
   return (

@@ -42,7 +42,15 @@ export default function Bridge({
       };
 
       if (variant === "tiles") {
-        const tiles = q(".tile") as HTMLElement[];
+        // The tiles are built here, not rendered: they only exist for the motion.
+        const grid = q(".tiles")[0] as HTMLElement;
+        grid.replaceChildren();
+        const tiles = Array.from({ length: TILES }, () => {
+          const tile = document.createElement("span");
+          tile.className = "tile";
+          grid.appendChild(tile);
+          return tile;
+        });
         const card = q(".card")[0] as HTMLElement;
         const thr = tiles.map(
           (_, i) => 0.06 + (((i * 17) % TILES) / TILES) * 0.66,
@@ -142,7 +150,6 @@ export default function Bridge({
       tl.to({}, { duration: 0.1 });
     },
     root,
-    index * 2 - 5,
   );
 
   return (
@@ -168,9 +175,6 @@ export default function Bridge({
           )}
           {variant === "tiles" && (
             <div className="tiles">
-              {Array.from({ length: TILES }, (_, i) => (
-                <span key={i} className="tile" />
-              ))}
             </div>
           )}
           <div className="card">

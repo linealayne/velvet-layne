@@ -549,7 +549,11 @@ html.anim .bridge-columns .card {
   background: var(--void);
 }
 .bridge-tiles .b-to {
+  background: var(--acid);
   color: #000;
+}
+html.anim .bridge-tiles .b-to {
+  background: transparent;
 }
 .tiles {
   position: absolute;
@@ -694,12 +698,6 @@ html.anim .belt-track {
   margin: 0;
   padding: 0;
   list-style: none;
-}
-.belt-copy {
-  display: none;
-}
-html.anim .belt-copy {
-  display: flex;
 }
 .item {
   flex: none;

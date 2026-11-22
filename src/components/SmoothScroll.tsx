@@ -44,15 +44,12 @@ export default function SmoothScroll() {
     });
     const main = document.querySelector("main");
     if (main) ro.observe(main);
-    document.fonts?.ready.then(refresh);
-    window.addEventListener("load", refresh);
 
     return () => {
       ro.disconnect();
       window.clearTimeout(settle);
       gsap.ticker.remove(track);
       if (raf) gsap.ticker.remove(raf);
-      window.removeEventListener("load", refresh);
       lenis?.destroy();
     };
   }, []);

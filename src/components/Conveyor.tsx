@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { gsap, ScrollTrigger, useStage, scrollState, motionOn } from "@/lib/gsap";
+import { objectArt, shapeArt } from "@/lib/art";
 
 type Item =
   | { k: "swatch"; name: string; hex: string }
@@ -50,90 +51,6 @@ const BELTS: Item[][] = [
   ],
 ];
 
-function ObjectArt({ shape }: { shape: string }) {
-  switch (shape) {
-    case "capsule":
-      return (
-        <svg viewBox="0 0 120 150" aria-hidden="true">
-          <rect x="38" y="14" width="44" height="18" rx="4" fill={INK} />
-          <rect x="24" y="34" width="72" height="104" rx="30" fill={EMBER} />
-          <rect x="24" y="74" width="72" height="26" fill={INK} />
-          <rect x="34" y="46" width="8" height="22" rx="4" fill="#fff" opacity=".55" />
-        </svg>
-      );
-    case "arch":
-      return (
-        <svg viewBox="0 0 120 150" aria-hidden="true">
-          <path d="M14 140V72a46 46 0 0 1 92 0v68H78V72a18 18 0 0 0-36 0v68z" fill="#1c2bff" />
-          <circle cx="60" cy="118" r="14" fill={INK} />
-        </svg>
-      );
-    case "discs":
-      return (
-        <svg viewBox="0 0 120 150" aria-hidden="true">
-          <ellipse cx="60" cy="118" rx="46" ry="14" fill={INK} />
-          <ellipse cx="60" cy="92" rx="38" ry="12" fill="#1c2bff" />
-          <ellipse cx="60" cy="68" rx="30" ry="10" fill={SUN} />
-          <ellipse cx="60" cy="46" rx="22" ry="8" fill={EMBER} />
-          <circle cx="60" cy="24" r="9" fill={INK} />
-        </svg>
-      );
-    default:
-      return (
-        <svg viewBox="0 0 120 150" aria-hidden="true">
-          <defs>
-            <radialGradient id="orb-g" cx="35%" cy="30%" r="75%">
-              <stop offset="0" stopColor="#ffd60a" />
-              <stop offset=".55" stopColor="#ff4a1c" />
-              <stop offset="1" stopColor="#7a0016" />
-            </radialGradient>
-          </defs>
-          <circle cx="60" cy="70" r="44" fill="url(#orb-g)" />
-          <rect x="22" y="126" width="76" height="8" fill={INK} />
-        </svg>
-      );
-  }
-}
-
-function ShapeArt({ shape, fg }: { shape: string; fg: string }) {
-  switch (shape) {
-    case "burst":
-      return (
-        <svg viewBox="0 0 120 120" aria-hidden="true">
-          {Array.from({ length: 12 }, (_, i) => (
-            <rect key={i} x="56" y="6" width="8" height="108" rx="4" fill={fg} transform={`rotate(${i * 15} 60 60)`} />
-          ))}
-        </svg>
-      );
-    case "halves":
-      return (
-        <svg viewBox="0 0 120 120" aria-hidden="true">
-          <path d="M10 44a50 34 0 0 1 100 0z" fill={fg} />
-          <path d="M10 82a50 34 0 0 1 100 0z" fill={fg} opacity=".7" />
-          <path d="M10 118a50 34 0 0 1 100 0z" fill={fg} opacity=".4" />
-        </svg>
-      );
-    case "squiggle":
-      return (
-        <svg viewBox="0 0 120 120" aria-hidden="true">
-          <path
-            d="M8 30c17-22 35 22 52 0s35 22 52 0M8 62c17-22 35 22 52 0s35 22 52 0M8 94c17-22 35 22 52 0s35 22 52 0"
-            fill="none"
-            stroke={fg}
-            strokeWidth="9"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    default:
-      return (
-        <svg viewBox="0 0 120 120" aria-hidden="true">
-          <path d="M10 110V80h25V55h25V30h25V10h25v100z" fill={fg} />
-        </svg>
-      );
-  }
-}
-
 function Card({ item }: { item: Item }) {
   let body: React.ReactNode;
   let style: React.CSSProperties = {};
@@ -161,9 +78,7 @@ function Card({ item }: { item: Item }) {
     style = { background: item.bg };
     body = (
       <>
-        <span className="art">
-          <ObjectArt shape={item.shape} />
-        </span>
+        <span className="art" dangerouslySetInnerHTML={{ __html: objectArt(item.shape) }} />
         <span className="item-label">
           <b>{item.name}</b>
           <span>Not for sale</span>
@@ -173,9 +88,10 @@ function Card({ item }: { item: Item }) {
   } else {
     style = { background: item.bg };
     body = (
-      <span className="art art-full">
-        <ShapeArt shape={item.shape} fg={item.fg} />
-      </span>
+      <span
+        className="art art-full"
+        dangerouslySetInnerHTML={{ __html: shapeArt(item.shape, item.fg) }}
+      />
     );
   }
   return (
@@ -194,6 +110,15 @@ export default function Conveyor() {
     () => {
       if (!motionOn()) return;
       const el = root.current!;
+      // The belt loops by following each set of cards with a copy of itself.
+      // The copy is cloned here rather than rendered, so it costs nothing at load.
+      el.querySelectorAll(".belt-set[data-copy]").forEach((old) => old.remove());
+      el.querySelectorAll<HTMLElement>(".belt-set").forEach((set) => {
+        const copy = set.cloneNode(true) as HTMLElement;
+        copy.setAttribute("aria-hidden", "true");
+        copy.dataset.copy = "";
+        set.after(copy);
+      });
       const belts = gsap.utils.toArray<HTMLElement>(".belt", el).map((belt, i) => ({
         track: belt.querySelector<HTMLElement>(".belt-track")!,
         floor: belt.querySelector<HTMLElement>(".belt-floor")!,
@@ -280,8 +205,7 @@ export default function Conveyor() {
         cleanups.forEach((fn) => fn());
       };
     },
-    root,
-    2
+    root
   );
 
   return (
@@ -299,11 +223,6 @@ export default function Conveyor() {
             <span className="belt-floor" aria-hidden="true" />
             <div className="belt-track">
               <ul className="belt-set">
-                {items.map((item, i) => (
-                  <Card key={i} item={item} />
-                ))}
-              </ul>
-              <ul className="belt-set belt-copy" aria-hidden="true">
                 {items.map((item, i) => (
                   <Card key={i} item={item} />
                 ))}

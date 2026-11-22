@@ -114,8 +114,7 @@ export default function Footer() {
         el.removeEventListener("touchmove", onTouch);
       };
     },
-    root,
-    10
+    root
   );
 
   return (

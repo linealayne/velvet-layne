@@ -42,8 +42,7 @@ export default function Dimension() {
         .fromTo(".dim-b", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.2 }, 0.58)
         .to({}, { duration: 0.22 });
     },
-    root,
-    6
+    root
   );
 
   return (

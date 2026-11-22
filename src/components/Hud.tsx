@@ -12,37 +12,47 @@ export default function Hud() {
   const bar = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    const triggers = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-chapter]")
-    ).map((el) =>
-      ScrollTrigger.create({
-        trigger: el,
-        start: "top 55%",
-        end: "bottom 55%",
-        onToggle: (self) => {
-          if (!self.isActive) return;
-          if (num.current) num.current.textContent = el.dataset.chapter ?? "1";
-          if (name.current) name.current.textContent = el.dataset.name ?? "";
+    let triggers: ScrollTrigger[] = [];
+    let progress: ScrollTrigger | undefined;
+    const timer = window.setTimeout(() => {
+      triggers = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-chapter]"),
+      ).map((el) =>
+        ScrollTrigger.create({
+          trigger: el,
+          start: "top 55%",
+          end: "bottom 55%",
+          onToggle: (self) => {
+            if (!self.isActive) return;
+            if (num.current)
+              num.current.textContent = el.dataset.chapter ?? "1";
+            if (name.current) name.current.textContent = el.dataset.name ?? "";
+          },
+        }),
+      );
+      progress = ScrollTrigger.create({
+        start: 0,
+        end: "max",
+        onUpdate: (self) => {
+          if (bar.current)
+            bar.current.style.transform = `scaleX(${self.progress.toFixed(4)})`;
         },
-      })
-    );
-    const progress = ScrollTrigger.create({
-      start: 0,
-      end: "max",
-      onUpdate: (self) => {
-        if (bar.current)
-          bar.current.style.transform = `scaleX(${self.progress.toFixed(4)})`;
-      },
-    });
+      });
+    }, 60);
     return () => {
+      window.clearTimeout(timer);
       triggers.forEach((t) => t.kill());
-      progress.kill();
+      progress?.kill();
     };
   }, []);
 
   return (
     <header className="hud">
-      <a className="hud-mark" href="#top" aria-label="Velvet Layne, back to top">
+      <a
+        className="hud-mark"
+        href="#top"
+        aria-label="Velvet Layne, back to top"
+      >
         Velvet Layne
       </a>
       <p className="hud-chapter" aria-hidden="true">

@@ -80,9 +80,17 @@ the shader and the 3D object render a single frame.
 
 - The intro (name, tagline, scroll cue) is animated with CSS keyframes, not
   JS, so the largest paint does not wait for hydration.
-- Chapter setup uses `useStage()` from `src/lib/gsap.ts`: like `useGSAP`, but
-  each chapter initialises in its own task a few ms apart instead of one long
-  task at load. Only `Act1` uses `useGSAP` directly.
+- Chapter setup uses `useStage()` from `src/lib/gsap.ts` instead of `useGSAP`.
+  By default a chapter sets itself up only when it comes within about a screen
+  of the viewport (`"near"`); `Act1` uses `"soon"` (its own task right after
+  hydration). Do not measure or animate inside a below-the-fold chapter at
+  load: that forces the browser to lay it out early and undoes the next point.
+- `page.tsx` wraps each chapter in `<Suspense>`. Nothing suspends; the
+  boundaries make React hydrate chapter by chapter in interruptible passes.
+- Illustrations (`src/lib/art.ts`) are SVG strings injected with
+  `dangerouslySetInnerHTML`, the second copy of each conveyor belt is cloned
+  at setup, and the transition tiles are created at setup. All of that keeps
+  the DOM React has to hydrate small.
 - Both WebGL scenes compile shaders asynchronously
   (`KHR_parallel_shader_compile` / `renderer.compileAsync`). Never read
   `LINK_STATUS` straight after linking; it blocks the main thread.
