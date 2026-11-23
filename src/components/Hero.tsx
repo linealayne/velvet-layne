@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import ColorField, { type FieldState } from "./ColorField";
-import { gsap, useStage, motionOn, isCoarse } from "@/lib/gsap";
+import { gsap, useStage, motionOn, isCoarse, isSmall } from "@/lib/gsap";
 import { VELVET, LAYNE, type Glyph } from "@/lib/glyphs";
 import { LETTER_SCENES } from "@/lib/scenes";
 import type { Engine, EngineOptions } from "@/lib/letterEngine";
@@ -19,7 +19,7 @@ function Line({ glyphs, start, delay }: { glyphs: Glyph[]; start: number; delay:
           className="lt"
           data-scene={LETTER_SCENES[start + i].name}
           style={
-            { flexGrow: g.w, "--d": (delay + i * 0.07).toFixed(2) } as React.CSSProperties
+            { "--g": g.w, "--d": (delay + i * 0.07).toFixed(2) } as React.CSSProperties
           }
         >
           <span className="lt-in">
@@ -39,9 +39,17 @@ function Line({ glyphs, start, delay }: { glyphs: Glyph[]; start: number; delay:
  * clipped to the letterform. Scrolling parts the name like a curtain, lets the
  * colour field bloom through its hues, then cools it to black for the Manifesto.
  *
- * The scenes are drawn by `lib/letterEngine.ts`. Normally that runs in a Web
- * Worker on offscreen canvases, so letters cost the main thread nothing, lit
- * or not. This component only sends "on" and "off".
+ * The scenes are drawn by `lib/letterEngine.ts` onto one small canvas per
+ * letter, clipped to the letter's outline with Path2D. Where the engine runs:
+ *  - WebKit (every iPhone browser, and Safari): on the main thread, on plain
+ *    canvases. This is the path verified in WebKit. Offscreen canvases in
+ *    workers are too unreliable there, and when that path fails it fails
+ *    silently, which is what left the letters dead on phones.
+ *  - Everything else: in a Web Worker on offscreen canvases, so the scenes
+ *    cost the main thread nothing. If the worker does not report in, or
+ *    throws, the page switches to the main-thread engine.
+ * The solid SVG letter is never hidden. The scene canvas sits on top of it, so
+ * whatever happens a letter can never go blank.
  */
 export default function Hero() {
   const root = useRef<HTMLDivElement>(null);
@@ -52,6 +60,7 @@ export default function Hero() {
       const el = root.current!;
       const moving = motionOn();
       const coarse = isCoarse();
+      const small = isSmall();
       const state = field.current;
       const cleanups: (() => void)[] = [];
       const options: EngineOptions = { moving, coarse };
@@ -63,8 +72,12 @@ export default function Hero() {
       const lit = nodes.map(() => false);
 
       /* ── The engine: a worker where possible, the main thread otherwise ── */
+      // GestureEvent exists only in WebKit.
+      const webkit = "GestureEvent" in window;
       const canTransfer =
-        typeof Worker !== "undefined" && "transferControlToOffscreen" in HTMLCanvasElement.prototype;
+        !webkit &&
+        typeof Worker !== "undefined" &&
+        "transferControlToOffscreen" in HTMLCanvasElement.prototype;
       let worker: Worker | null = null;
       let local: Engine | null = null;
       let localLoading: Promise<void> | null = null;
@@ -87,30 +100,73 @@ export default function Hero() {
         send({ type: "clear", i });
       };
 
+      const loadLocal = () =>
+        (localLoading ??= import("@/lib/letterEngine").then(({ createEngine }) => {
+          local = createEngine(options, idle);
+        }));
+
+      // The worker failed or never answered: drop it and run the engine here.
+      let watchdog = 0;
+      const abandonWorker = async () => {
+        if (!worker) return;
+        window.clearTimeout(watchdog);
+        worker.terminate();
+        worker = null;
+        canvases.forEach((c, i) => {
+          c?.remove();
+          canvases[i] = undefined;
+          nodes[i].classList.remove("is-on");
+        });
+        await loadLocal();
+        lit.forEach((on, i) => {
+          if (on) {
+            lit[i] = false;
+            activate(i);
+          }
+        });
+      };
+
       const boot = () => {
         if (worker || local) return null;
         if (localLoading) return localLoading;
         if (canTransfer) {
           try {
             worker = new Worker(new URL("../lib/letters.worker.ts", import.meta.url), { type: "module" });
-            worker.onmessage = (e: MessageEvent<FromWorker>) => idle(e.data.i);
+            worker.onmessage = (e: MessageEvent<FromWorker>) => {
+              if (e.data.type === "ready") window.clearTimeout(watchdog);
+              else idle(e.data.i);
+            };
+            worker.onerror = () => void abandonWorker();
+            watchdog = window.setTimeout(() => void abandonWorker(), 2500);
             worker.postMessage({ type: "init", options } satisfies ToWorker);
             return null;
           } catch {
             worker = null;
           }
         }
-        localLoading = import("@/lib/letterEngine").then(({ createEngine }) => {
-          local = createEngine(options, idle);
-        });
-        return localLoading;
+        return loadLocal();
       };
 
-      const sizeOf = (i: number) => ({
-        w: inner[i].clientWidth,
-        h: inner[i].clientHeight,
-        dpr: Math.min(window.devicePixelRatio || 1, coarse ? 1.25 : 1.5),
-      });
+      // On phones a lit letter opens wider (see `.lt.is-on` in globals.css) so
+      // its scene can actually be seen. The canvas is sized for that final
+      // width up front, so the scene is right from its first frame.
+      const WIDE = 2.6;
+      const sizeOf = (i: number) => {
+        let w = inner[i].clientWidth;
+        if (small) {
+          const row = nodes[i].parentElement!;
+          const mates = nodes.filter((n) => n.parentElement === row);
+          const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+          const sum = mates.reduce((a, n) => a + ALL[nodes.indexOf(n)].w, 0);
+          const g = ALL[i].w;
+          w = ((row.clientWidth - gap * (mates.length - 1)) * g * WIDE) / (sum - g + g * WIDE);
+        }
+        return {
+          w: Math.round(w),
+          h: inner[i].clientHeight,
+          dpr: Math.min(window.devicePixelRatio || 1, coarse ? 2 : 1.5),
+        };
+      };
 
       const ensure = (i: number) => {
         if (canvases[i]) return;
@@ -257,6 +313,7 @@ export default function Hero() {
 
       return () => {
         cleanups.forEach((fn) => fn());
+        window.clearTimeout(watchdog);
         worker?.terminate();
         canvases.forEach((c) => c?.remove());
         nodes.forEach((n) => n.classList.remove("is-on", "kick"));

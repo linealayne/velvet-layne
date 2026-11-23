@@ -72,7 +72,7 @@ export default function Sculpture() {
         renderer.dispose();
         renderer.domElement.remove();
       });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, small ? 1.25 : 1.75));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, small ? 1.5 : 1.75));
       renderer.toneMapping = ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.05;
       host.appendChild(renderer.domElement);

@@ -1,0 +1,133 @@
+/**
+ * Everything the Corridor shows, prepared ahead of time.
+ *
+ * `preloadCorridor()` can be called long before the chapter is reached (it is
+ * called once the hero has settled, and again by anything that gets there
+ * first). It is idempotent and never blocks:
+ *  - every capture gets a canvas straight away, painted with a solid colour
+ *    and the site's name, so a panel is never empty;
+ *  - the real image is fetched and decoded off the main thread, then drawn
+ *    over that placeholder, and listeners are told so the scene can swap it in;
+ *  - the posters are drawn a few at a time while the browser is idle.
+ * It has no three.js in it, so preloading costs no extra JavaScript.
+ */
+import { makePoster, postersReady, POSTER_COUNT } from "./posters";
+
+// Captures of Layne's own live Linea demo sites (see scripts/captures.mjs).
+// The names are the demo sites' own names. The colours only show for the
+// moment before the image arrives.
+const CAPTURES: [file: string, name: string, color: string, ink: string][] = [
+  ["ashgrove-1", "ASHGROVE", "#5c0a14", "#efe4d0"],
+  ["hollis-1", "HOLLIS", "#0a0707", "#efe4d0"],
+  ["auren-2", "AUREN", "#c9ced6", "#0a0707"],
+  ["blendwell-1", "BLENDWELL", "#efe4d0", "#0a0707"],
+  ["cairn-2", "CAIRN", "#0a0707", "#ff4d00"],
+  ["rove-1", "ROVE", "#c9ced6", "#0a0707"],
+  ["hollis-2", "HOLLIS", "#5c0a14", "#efe4d0"],
+  ["ashgrove-2", "ASHGROVE", "#ff4d00", "#0a0707"],
+  ["rove-2", "ROVE", "#efe4d0", "#0a0707"],
+];
+
+export const CAPTURE_W = 800;
+export const CAPTURE_H = 500;
+
+export type CaptureAsset = {
+  canvas: HTMLCanvasElement;
+  ready: boolean;
+  /** Called when the real image has been drawn into `canvas`. */
+  listeners: (() => void)[];
+};
+
+type Assets = {
+  captures: CaptureAsset[];
+  posters: HTMLCanvasElement[];
+  /** Resolves when all posters exist. */
+  postersDone: Promise<void>;
+};
+
+let assets: Assets | null = null;
+
+const idle = () =>
+  new Promise<void>((resolve) => {
+    if ("requestIdleCallback" in window) window.requestIdleCallback(() => resolve(), { timeout: 300 });
+    else setTimeout(resolve, 30);
+  });
+
+function frame(g: CanvasRenderingContext2D) {
+  g.strokeStyle = "#efe4d0";
+  g.lineWidth = 10;
+  g.strokeRect(5, 5, CAPTURE_W - 10, CAPTURE_H - 10);
+}
+
+function placeholder(c: HTMLCanvasElement, name: string, color: string, ink: string) {
+  const g = c.getContext("2d")!;
+  const family =
+    getComputedStyle(document.documentElement).getPropertyValue("--font-anybody").trim() ||
+    '"Arial Black", Impact, sans-serif';
+  g.fillStyle = color;
+  g.fillRect(0, 0, CAPTURE_W, CAPTURE_H);
+  g.fillStyle = ink;
+  g.font = `900 132px ${family}`;
+  g.textBaseline = "alphabetic";
+  const width = g.measureText(name).width;
+  const max = CAPTURE_W - 90;
+  if (width > max) g.font = `900 ${Math.floor((132 * max) / width)}px ${family}`;
+  g.fillText(name, 45, CAPTURE_H - 60);
+  g.fillRect(45, 58, 190, 12);
+  frame(g);
+}
+
+async function loadCapture(asset: CaptureAsset, file: string) {
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = `/work/${file}.webp`;
+    // decode() resolves once the pixels are ready, so drawing it cannot stall.
+    await img.decode();
+    const g = asset.canvas.getContext("2d")!;
+    g.drawImage(img, 0, 0, CAPTURE_W, CAPTURE_H);
+    frame(g);
+    asset.ready = true;
+    asset.listeners.forEach((fn) => fn());
+  } catch {
+    /* the placeholder stays */
+  }
+}
+
+export function preloadCorridor(): Assets {
+  if (assets) return assets;
+  const captures: CaptureAsset[] = CAPTURES.map(([, name, color, ink]) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = CAPTURE_W;
+    canvas.height = CAPTURE_H;
+    placeholder(canvas, name, color, ink);
+    return { canvas, ready: false, listeners: [] };
+  });
+
+  // Two at a time, in the order the tunnel will use them.
+  let next = 0;
+  const worker = async () => {
+    while (next < captures.length) {
+      const i = next++;
+      await loadCapture(captures[i], CAPTURES[i][0]);
+    }
+  };
+  worker();
+  worker();
+
+  const posters: HTMLCanvasElement[] = [];
+  const postersDone = (async () => {
+    await postersReady();
+    // The display font is certainly loaded now: repaint any placeholder still showing.
+    captures.forEach((c, i) => {
+      if (!c.ready) placeholder(c.canvas, CAPTURES[i][1], CAPTURES[i][2], CAPTURES[i][3]);
+    });
+    for (let i = 0; i < POSTER_COUNT; i++) {
+      posters.push(makePoster(i));
+      if (i % 2 === 1) await idle();
+    }
+  })();
+
+  assets = { captures, posters, postersDone };
+  return assets;
+}

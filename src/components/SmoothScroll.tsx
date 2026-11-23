@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import Lenis from "lenis";
-import { gsap, ScrollTrigger, scrollState, motionOn } from "@/lib/gsap";
+import { gsap, ScrollTrigger, scrollState, motionOn, isCoarse } from "@/lib/gsap";
 
 /**
  * Lenis smooths wheel input only (touch stays native), driven by the GSAP
@@ -17,11 +17,15 @@ export default function SmoothScroll() {
     // does not need to re-measure the whole page again on window load.
     ScrollTrigger.config({ autoRefreshEvents: "visibilitychange" });
 
-    const lenis = new Lenis({ lerp: 0.12, smoothWheel: true, anchors: true });
-    lenis.on("scroll", ScrollTrigger.update);
-    const raf = (time: number) => lenis.raf(time * 1000);
-    gsap.ticker.add(raf);
-    gsap.ticker.lagSmoothing(0);
+    // Touch screens keep their native scroll, untouched: no Lenis at all there.
+    // Lenis only smooths the mouse wheel.
+    const lenis = isCoarse() ? null : new Lenis({ lerp: 0.12, smoothWheel: true, anchors: true });
+    lenis?.on("scroll", ScrollTrigger.update);
+    const raf = (time: number) => lenis?.raf(time * 1000);
+    if (lenis) {
+      gsap.ticker.add(raf);
+      gsap.ticker.lagSmoothing(0);
+    }
 
     // Velocity comes from scroll events, so an idle page never reads layout.
     let y = window.scrollY;
@@ -60,7 +64,7 @@ export default function SmoothScroll() {
       window.removeEventListener("scroll", onScroll);
       gsap.ticker.remove(track);
       gsap.ticker.remove(raf);
-      lenis.destroy();
+      lenis?.destroy();
     };
   }, []);
 

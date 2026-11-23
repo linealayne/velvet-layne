@@ -202,7 +202,7 @@ html.anim .intro-black {
 }
 .lt {
   position: relative;
-  flex: 1 1 0;
+  flex: var(--g, 1) 1 0;
   min-width: 0;
   overflow: hidden;
 }
@@ -216,9 +216,6 @@ html.anim .intro-black {
   width: 100%;
   height: 100%;
   fill: var(--bone);
-}
-.lt.is-on svg {
-  opacity: 0;
 }
 .lt-scene {
   position: absolute;
@@ -657,9 +654,6 @@ html.anim .cor-paper {
     0 0 0 9px #000,
     0 0 0 10px rgba(239, 228, 208, 0.35),
     0 40px 140px #000;
-}
-html.anim .cor-frame {
-  opacity: 0;
 }
 .cor-line {
   grid-area: 1 / 1;
@@ -1271,9 +1265,30 @@ main > .bridge {
   contain-intrinsic-size: auto 200svh;
 }
 
-/* ───────── Small screens: a designed phone show ───────── */
+/* ───────── Phones and small tablets (under 1024 this is its own design) ───────── */
 
 @media (max-width: 820px) {
+  /*
+    Phones are their own cut of the show, not a squeezed desktop.
+
+    Heights: every sticky stage is one LARGE viewport tall (lvh), so nothing
+    shows beneath it and no canvas resizes when Safari's address bar slides
+    away. Anything that must stay in view is placed with the SMALL viewport
+    (svh), so it does not move when the bar comes and goes.
+  */
+  html.anim .intro-stage,
+  html.anim .mf-stage,
+  html.anim .bridge-stage,
+  html.anim .cor-stage,
+  html.anim .dim-stage,
+  html.anim .fin-stage {
+    height: 100lvh;
+  }
+  .field {
+    height: 100lvh;
+    margin-bottom: -100lvh;
+  }
+
   /* A blend mode over a moving canvas costs a full-screen pass per frame.
      On phones the field's grain is a plain overlay instead. */
   .grain {
@@ -1287,18 +1302,48 @@ main > .bridge {
     opacity: 0.17;
   }
 
-  /* The name stays two stacked lines, full-bleed, stretched tall. */
+  /* ── Hero: two stacked lines, edge to edge, stretched tall ── */
   .name {
-    --gap: 5px;
-    inset: 8px 8px 58px;
+    --gap: 4px;
+    inset: 8px 8px auto;
+    height: calc(100svh - 78px);
+  }
+  /* A lit letter opens wider and squeezes its neighbours, so the scene inside
+     is big enough to read on a phone. The letters are outlines that stretch,
+     so they give way cleanly. */
+  .lt {
+    transition: flex-grow 0.36s cubic-bezier(0.3, 0.9, 0.2, 1);
+  }
+  .lt.is-on {
+    flex-grow: calc(var(--g) * 2.6);
+  }
+  .cue-wrap {
+    inset: calc(100svh - 50px) 0 auto;
+  }
+  .cue {
+    gap: 0.6em;
+    perspective: 240px;
+    font-size: 15px;
+  }
+  .cue span {
+    transform-origin: 50% 50% -15px;
   }
 
+  /* ── Manifesto: big, short lines ── */
+  .mf-stage {
+    padding: 0 18px;
+  }
   .mf-lines {
-    font-size: 13.6vw;
-    font-variation-settings: "wdth" 52;
+    max-height: 100svh;
+    font-size: min(20vw, 8.6svh);
+    font-variation-settings: "wdth" 50;
+    line-height: 0.9;
+  }
+  .mf-line {
+    text-wrap: balance;
   }
   .mf-line + .mf-line {
-    margin-top: 0.34em;
+    margin-top: 0.32em;
   }
   .mf-word {
     white-space: pre-wrap;
@@ -1312,65 +1357,97 @@ main > .bridge {
     grid-template-rows: repeat(10, 1fr);
   }
 
+  /* ── Editorial: one column. Numeral, plate, then the words ── */
+  .editorial {
+    padding: 9svh 20px 12svh;
+  }
+  .ed-open {
+    padding: 0 0 8svh;
+    row-gap: 26px;
+  }
   .ed-title {
-    font-size: 16.5vw;
+    font-size: 17.5vw;
+    line-height: 0.92;
   }
   .ed-title .line:nth-child(2) {
     padding-left: 0;
   }
   .ed-lede {
     grid-column: 1 / -1;
+    max-width: 32ch;
+    font-size: 18px;
+    line-height: 1.45;
   }
   .ed-step {
-    row-gap: 22px;
-    align-items: end;
+    display: block;
+    padding: 34px 0 46px;
   }
   .ed-step .ed-num,
   .ed-step:nth-child(even) .ed-num {
-    grid-column: 1 / 6;
-    grid-row: 1;
+    display: block;
+    margin: 0 0 18px;
+    font-size: 66vw;
+    line-height: 0.74;
     text-align: left;
-    font-size: 46vw;
-  }
-  .ed-step .ed-figure,
-  .ed-step:nth-child(even) .ed-figure {
-    grid-column: 6 / -1;
-    grid-row: 1;
   }
   .ed-step:nth-child(even) .ed-num {
-    grid-column: 8 / -1;
     text-align: right;
   }
-  .ed-step:nth-child(even) .ed-figure {
-    grid-column: 1 / 8;
+  .plate {
+    aspect-ratio: 5 / 4;
+  }
+  .ed-step .ed-figure {
+    margin-top: 28px;
   }
   .ed-step .ed-copy,
   .ed-step:nth-child(even) .ed-copy {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    padding-top: 0;
+    padding-top: 26px;
+  }
+  .ed-copy h3 {
+    margin-bottom: 0.42em;
+    font-size: 9.4vw;
+    line-height: 1.02;
+  }
+  .ed-copy p {
+    max-width: 34ch;
+    font-size: 17px;
+    line-height: 1.5;
   }
 
+  /* ── Corridor: the frame fits the width ── */
   html.anim .corridor {
     height: 400svh;
   }
   .cor-frame {
-    width: 70vw;
-    aspect-ratio: 4 / 3;
+    width: 80vw;
+    aspect-ratio: 5 / 4;
+    padding: 5%;
     border-width: 2px;
   }
   .cor-line {
-    font-size: 11.5vw;
+    font-size: 15vw;
+    text-wrap: balance;
   }
 
+  /* ── Dimension: knot above, words below, clear of Safari's toolbar ── */
+  .dim-stage {
+    padding: 20px 20px 28px;
+  }
   .dim-text {
     max-width: none;
   }
   .sculpture {
-    inset: 0 0 30% 0;
+    inset: 0 0 24% 0;
   }
   html.anim .dim-text {
-    right: var(--pad);
+    right: 20px;
+    bottom: calc(100lvh - 100svh + 30px);
+    left: 20px;
+  }
+  .dim-text h2,
+  .dim-big {
+    font-size: 11.6vw;
+    line-height: 1;
   }
   .dim-fallback {
     top: 34%;
@@ -1383,34 +1460,93 @@ main > .bridge {
       radial-gradient(50% 30% at 44% 44%, rgba(255, 77, 0, 0.14), transparent 72%);
   }
 
+  /* ── Brutal: one loud column ── */
+  .brutal {
+    padding: 10svh 16px 0;
+  }
   .br-title {
+    margin-bottom: 20px;
     font-size: 45vw;
   }
   .br-row {
     grid-template-columns: 1fr;
-    gap: 34px;
-  }
-  .br-note {
-    margin-top: 0;
-    margin-left: 12%;
+    gap: 30px;
   }
   .br-sticker {
-    position: absolute;
-    top: -70px;
-    right: 0;
-    width: 104px;
+    position: relative;
+    z-index: 2;
+    grid-row: 1;
+    justify-self: end;
+    width: 116px;
+    margin: -36px 6px -34px 0;
+  }
+  .br-list {
+    grid-row: 2;
+    rotate: -1deg;
+  }
+  .br-list li {
+    padding: 13px 6px;
+    font-size: 8.6vw;
+  }
+  .br-note {
+    grid-row: 3;
     margin: 0;
+    rotate: 1deg;
+  }
+  .br-note p {
+    font-size: 18px;
+  }
+  .br-button {
+    width: 100%;
+    min-height: 58px;
+    font-size: 20px;
   }
   .br-block {
     box-shadow: 7px 7px 0 #000;
   }
+  .br-marquee {
+    margin-top: 9svh;
+    font-size: 11vw;
+  }
+  .br-huge {
+    font-size: 58vw;
+  }
 
+  /* ── Finale: the three words fill the width ── */
   .fin-stage {
     perspective: 760px;
   }
   .sys {
-    font-size: min(33vw, 25svh);
-    padding: 0 4vw;
+    height: 100svh;
+    inset: 0 0 auto;
+    padding: 0 3vw;
+    font-size: min(56vw, 25svh);
+  }
+  .sys-word:nth-of-type(4) {
+    font-size: 0.74em;
+  }
+
+  /* ── Footer: a button you can hit with a thumb ── */
+  .footer {
+    min-height: 78svh;
+    padding: 10svh 20px 26px;
+  }
+  .foot-main h2 {
+    font-size: 13.5vw;
+  }
+  .foot-cta {
+    display: block;
+    width: 100%;
+    max-width: 340px;
+    margin-inline: auto;
+    padding: 21px 24px;
+    font-size: 19px;
+    text-align: center;
+  }
+  .foot-base a {
+    display: inline-block;
+    padding: 14px 10px;
+    font-size: 15px;
   }
 }
 

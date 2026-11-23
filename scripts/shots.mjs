@@ -2,7 +2,9 @@
 // cue mid-roll, every chapter, every transition mid-motion, reduced motion.
 // Usage: node scripts/shots.mjs [url] [outDir] [filter] [jpeg]
 //   filter: substring of a run tag (1440, 390, reduced, 1024, 768, 375) or "all"
-import { chromium } from "playwright-core";
+//   phone runs in real engines: wk393 (WebKit, iPhone 15), wk375 (WebKit, iPhone SE),
+//   px412 (Chromium, Pixel), and wk393-reduced
+import { chromium, webkit, devices } from "playwright-core";
 import { mkdirSync } from "node:fs";
 
 const url = process.argv[2] || "http://localhost:3210";
@@ -19,19 +21,28 @@ const RUNS = [
   { tag: "1024", width: 1024, height: 768, extra: true },
   { tag: "768", width: 768, height: 1024, extra: true, mobile: true },
   { tag: "375", width: 375, height: 667, extra: true, mobile: true },
+  { tag: "wk393", width: 393, height: 852, extra: true, mobile: true, engine: "webkit", device: "iPhone 15" },
+  { tag: "wk375", width: 375, height: 667, extra: true, mobile: true, engine: "webkit", device: "iPhone SE" },
+  { tag: "px412", width: 412, height: 915, extra: true, mobile: true, device: "Pixel 7" },
+  { tag: "wk393-reduced", width: 393, height: 852, extra: true, mobile: true, reduced: true, engine: "webkit", device: "iPhone 15" },
 ].filter((r) => (only ? r.tag.includes(only) : !r.extra));
 
-const browser = await chromium.launch({
-  channel: "chrome",
-  args: ["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-gpu"],
-});
+const launched = {};
+const browserFor = async (engine = "chromium") =>
+  (launched[engine] ??=
+    engine === "webkit"
+      ? await webkit.launch()
+      : await chromium.launch({
+          channel: "chrome",
+          args: ["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-gpu"],
+        }));
 
 for (const run of RUNS) {
+  const browser = await browserFor(run.engine);
   const ctx = await browser.newContext({
+    ...(run.device ? devices[run.device] : {}),
     viewport: { width: run.width, height: run.height },
-    deviceScaleFactor: run.mobile ? 2 : 1,
-    hasTouch: !!run.mobile,
-    isMobile: !!run.mobile,
+    ...(run.device ? {} : { deviceScaleFactor: run.mobile ? 2 : 1, hasTouch: !!run.mobile, isMobile: !!run.mobile }),
     reducedMotion: run.reduced ? "reduce" : "no-preference",
   });
   const page = await ctx.newPage();
@@ -198,4 +209,4 @@ for (const run of RUNS) {
   errors.slice(0, 5).forEach((e) => console.log("  ", e));
   await ctx.close();
 }
-await browser.close();
+for (const b of Object.values(launched)) await b.close();

@@ -27,7 +27,7 @@ export default function Finale() {
     const chars = Array.from(el.querySelectorAll<HTMLElement>(".sys-ch"));
     const moving = motionOn();
     const small = isSmall();
-    const N = small ? 9 : 15;
+    const N = small ? 7 : 15;
     let disposed = false;
     let stop = () => {};
 
@@ -58,7 +58,7 @@ export default function Finale() {
         vh = stage.clientHeight;
         if (!vw) return;
         P = small ? 760 : 1100;
-        tw = small ? 84 : Math.min(160, Math.max(112, vw * 0.09));
+        tw = small ? Math.min(120, vw * 0.25) : Math.min(160, Math.max(112, vw * 0.09));
         th = tw * (POSTER_H / POSTER_W);
         tiles.forEach((t) => {
           t.canvas.style.width = `${tw}px`;
@@ -79,14 +79,14 @@ export default function Finale() {
 
       let angle = 0.6;
       const place = () => {
-        const Rx = Math.min(vw * (small ? 0.62 : 0.56), 840);
-        const Rz = small ? 300 : 470;
+        const Rx = Math.min(vw * (small ? 0.58 : 0.56), 840);
+        const Rz = small ? 250 : 470;
         const now = chars.map(() => false);
         for (const t of tiles) {
           const a = t.a0 + (t.ring ? -angle : angle);
           const x = Math.cos(a) * Rx;
           const z = Math.sin(a) * Rz;
-          const y = (t.ring ? 0.19 : -0.2) * vh + Math.sin(a + t.ring * 1.7) * vh * 0.1;
+          const y = (t.ring ? 0.19 : -0.2) * vh * (small ? 0.82 : 1) + Math.sin(a + t.ring * 1.7) * vh * 0.1;
           const turn = -Math.cos(a) * 40 * (t.ring ? -1 : 1);
           t.canvas.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,${z.toFixed(1)}px) rotateY(${turn.toFixed(1)}deg)`;
           // Where does this tile land on screen?

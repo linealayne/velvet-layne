@@ -13,7 +13,7 @@ export type ToWorker =
   | { type: "on" | "off" | "clear"; i: number }
   | { type: "warm" };
 
-export type FromWorker = { type: "idle"; i: number };
+export type FromWorker = { type: "idle"; i: number } | { type: "ready" };
 
 let engine: Engine | null = null;
 
@@ -24,6 +24,9 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       const out: FromWorker = { type: "idle", i };
       (self as DedicatedWorkerGlobalScope).postMessage(out);
     });
+    // Tell the page the engine is alive. If this never arrives, the page
+    // falls back to running the engine itself.
+    (self as DedicatedWorkerGlobalScope).postMessage({ type: "ready" } satisfies FromWorker);
     return;
   }
   if (!engine) return;

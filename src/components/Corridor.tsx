@@ -3,33 +3,69 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { gsap, useStage, motionOn } from "@/lib/gsap";
+import { preloadCorridor } from "@/lib/corridorAssets";
 
-// three.js and the scene are only downloaded as this chapter approaches.
+// three.js and the scene are downloaded as soon as the visitor starts to
+// travel, long before this chapter.
 const CorridorScene = dynamic(() => import("./CorridorScene"), { ssr: false });
 
 const LINES = ["Walk the work.", "Every wall is mine.", "Nothing borrowed.", "Keep going."];
 
 /**
- * Chapter 4, the centrepiece. Editorial's tan paper fades slowly to black,
- * and out of the black comes the Corridor. A framed panel at the centre holds
- * a line that changes as you travel.
+ * Chapter 4, the centrepiece. Editorial's tan paper fades slowly away and the
+ * Corridor is already there behind it, populated and moving. A framed panel at
+ * the centre holds a line that changes as you travel.
+ *
+ * Loading is front-loaded so nothing is blank on arrival:
+ *  1. once the hero has settled, the panel images are fetched and decoded and
+ *     the posters are drawn (`preloadCorridor`, no three.js involved);
+ *  2. as soon as the visitor scrolls, the three.js scene is mounted and built,
+ *     which uploads every texture and draws the first frame;
+ *  3. the frame and the tunnel sit fully ready under the paper.
  */
 export default function Corridor() {
   const root = useRef<HTMLElement>(null);
   const [near, setNear] = useState(false);
 
   useEffect(() => {
-    const io = new IntersectionObserver(
+    // 1. Assets: when the browser is idle after the hero, or on first input.
+    const warm = () => {
+      preloadCorridor();
+    };
+    const timer = window.setTimeout(() => {
+      if ("requestIdleCallback" in window) window.requestIdleCallback(warm, { timeout: 1500 });
+      else warm();
+    }, 2600);
+
+    // 2. Scene: at the first real scroll, or when the chapter is a few
+    //    screens away, whichever comes first.
+    let done = false;
+    let io: IntersectionObserver | null = null;
+    const onScroll = () => {
+      if (window.scrollY > window.innerHeight * 0.35) mount();
+    };
+    const mount = () => {
+      if (done) return;
+      done = true;
+      warm();
+      setNear(true);
+      window.removeEventListener("scroll", onScroll);
+      io?.disconnect();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    io = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
-          setNear(true);
-          io.disconnect();
-        }
+        if (entry.isIntersecting) mount();
       },
-      { rootMargin: "250% 0px" }
+      { rootMargin: "500% 0px" }
     );
     io.observe(root.current!);
-    return () => io.disconnect();
+    onScroll();
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("scroll", onScroll);
+      io?.disconnect();
+    };
   }, []);
 
   useStage(() => {
@@ -54,10 +90,9 @@ export default function Corridor() {
           },
         },
       })
-      // The slow fade: paper to black, then the tunnel out of the black.
+      // The slow fade: the paper thins out and the tunnel is already running
+      // behind it. Nothing has to appear afterwards.
       .fromTo(".cor-paper", { opacity: 1 }, { opacity: 0, duration: 0.2, ease: "power1.inOut" }, 0)
-      .fromTo(".cor-world", { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power1.in" }, 0.1)
-      .fromTo(".cor-frame", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.12, ease: "power2.out" }, 0.2)
       .to(".cor-world", { opacity: 0, duration: 0.07 }, 0.93)
       .to(".cor-frame", { opacity: 0, scale: 0.2, duration: 0.07, ease: "power2.in" }, 0.93);
   }, root);
@@ -69,7 +104,6 @@ export default function Corridor() {
           {near && <CorridorScene />}
           <div className="cor-fallback" aria-hidden="true" />
         </div>
-        <div className="cor-paper" aria-hidden="true" />
         <div className="cor-frame">
           <h2 className="sr-only">The corridor</h2>
           {LINES.map((line, i) => (
@@ -78,6 +112,7 @@ export default function Corridor() {
             </p>
           ))}
         </div>
+        <div className="cor-paper" aria-hidden="true" />
       </div>
     </section>
   );
