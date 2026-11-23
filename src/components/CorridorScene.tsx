@@ -14,19 +14,124 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   PlaneGeometry,
-  RepeatWrapping,
   Scene,
+  ShaderMaterial,
   SRGBColorSpace,
   WebGLRenderer,
 } from "three";
 import { ScrollTrigger, scrollState, calm, motionOn, isSmall } from "@/lib/gsap";
 import { preloadCorridor } from "@/lib/corridorAssets";
-import { corridorState, entranceLight, FOG_FAR, FOG_NEAR } from "@/lib/corridorState";
+import { corridorState, ribbonLight, tunnelLight, FOG_FAR, FOG_NEAR } from "@/lib/corridorState";
 
 const LENGTH = 52; // how far the tunnel runs before a panel wraps
 const BASE_SPEED = 6.5; // units per second, always
 
 type Slot = { mesh: Mesh; base: number; lap: number; shape: "port" | "land" };
+
+const RIBBON_VERT = /* glsl */ `
+attribute float aStrip;
+attribute float aSide;
+attribute float aV;
+uniform float uP;
+uniform float uTime;
+uniform float uN;
+uniform vec2 uPage;
+uniform float uD0;
+uniform vec2 uTun;
+uniform float uFar;
+varying vec2 vUv;
+varying float vShade;
+varying float vDepth;
+
+float hash1(float n){return fract(sin(n*127.1+3.7)*43758.5453);}
+
+void main(){
+  float n=uN,i=aStrip;
+  float u0=(i+.5)/n;
+  float sw=uPage.x/n;
+  float seed=hash1(i);
+
+  // 0. The flat page, exactly filling the screen. It eases back a little so
+  //    the dark can open around it.
+  float back=.8*smoothstep(0.,.34,uP);
+  vec3 P0=vec3((u0-.5)*uPage.x,(aV-.5)*uPage.y,-uD0-back);
+
+  // 1. Coming loose. A cut climbs from the bottom edge; below it each strip
+  //    hangs free and ripples in a light draft.
+  float c=.46*smoothstep(0.,.24,uP)+.62*smoothstep(.2,.5,uP);
+  float l=smoothstep(c,c-.07,aV);
+  float hang=min(max(c-aV,0.),.5)*l*uPage.y;
+  float w1=sin(uTime*1.05+seed*6.28+aV*6.)*.6+sin(uTime*.63+seed*11.+aV*11.)*.4;
+  float w2=cos(uTime*.85+seed*9.4+aV*5.);
+  P0.x+=w1*hang*.085;
+  P0.z+=(w2*.5+.55)*hang*.26;
+  P0.y-=hang*.07;
+  float narrow=1.-.13*l;
+
+  // 2. Pulled into the depth, loose end first.
+  float pp=clamp((uP-.22)/.56,0.,1.);
+  float r=smoothstep(0.,1.,pp*2.15-aV*1.15);
+
+  // 3. Where this ribbon comes to rest: laid along a wall, the floor or the
+  //    ceiling of the tunnel, running away into the distance.
+  float nw=floor(n*.22+.5);
+  float m=n-2.*nw;
+  vec3 X;vec3 T;vec3 Nrm;float wd;
+  if(i<nw){
+    X=vec3(-uTun.x*.4925,((i+.5)/nw-.5)*uTun.y,0.);T=vec3(0.,1.,0.);Nrm=vec3(1.,0.,0.);wd=uTun.y/nw;
+  }else if(i>=n-nw){
+    float j=i-(n-nw);
+    X=vec3(uTun.x*.4925,((j+.5)/nw-.5)*uTun.y,0.);T=vec3(0.,1.,0.);Nrm=vec3(-1.,0.,0.);wd=uTun.y/nw;
+  }else{
+    float j=i-nw;
+    float top=mod(j,2.);
+    float half_=ceil(m*.5);
+    float k=floor(j*.5);
+    X=vec3(((k+.5)/half_-.5)*uTun.x,(top<.5?-1.:1.)*uTun.y*.4925,0.);
+    T=vec3(1.,0.,0.);Nrm=vec3(0.,top<.5?1.:-1.,0.);wd=uTun.x/half_;
+  }
+  vec3 P2=vec3(X.xy,mix(uFar,1.5,aV));
+
+  // On the way, the ribbons gather toward the centre line and wave.
+  float mid=sin(3.14159*r);
+  vec3 P=mix(P0,P2,r);
+  P.xy*=1.-.66*mid;
+  float a=uTime*1.2+seed*20.+aV*7.;
+  P.x+=sin(a)*.3*mid;
+  P.y+=cos(a*.83+1.3)*.24*mid;
+
+  // Twist: the strip turns about its own length while it is free.
+  float tw=mid*sin(uTime*.9+seed*15.+aV*4.5)*1.2+l*(1.-r)*w2*.5;
+  vec3 side=normalize(mix(vec3(1.,0.,0.),T,r));
+  vec3 tv=normalize(mix(vec3(0.,0.,1.),Nrm,r));
+  side=normalize(side*cos(tw)+tv*sin(tw));
+  P+=side*aSide*mix(sw*narrow,wd*.94,r);
+
+  vShade=(1.-.32*abs(sin(tw)))*(1.-.22*l*(1.-r)*(.5-.5*w2));
+  // A ribbon gives up its light as it is laid along the tunnel, so the
+  // stretched paper is never seen bright: it settles into the dark walls.
+  vShade*=1.-.9*smoothstep(.42,.94,r);
+  vUv=vec2((i+.5+aSide)/n,aV);
+  vec4 mv=modelViewMatrix*vec4(P,1.);
+  vDepth=-mv.z;
+  gl_Position=projectionMatrix*mv;
+}`;
+
+const RIBBON_FRAG = /* glsl */ `
+uniform sampler2D uMap;
+uniform float uFade;
+uniform vec2 uFog;
+varying vec2 vUv;
+varying float vShade;
+varying float vDepth;
+void main(){
+  vec3 c=texture2D(uMap,vUv).rgb;
+  c*=vShade*(gl_FrontFacing?1.:.8);
+  // The tunnel's own fog, then the last of the paper's light going out.
+  c*=(1.-smoothstep(uFog.x,uFog.y,vDepth))*uFade;
+  gl_FragColor=vec4(c,1.);
+  #include <colorspace_fragment>
+}`;
 
 const pause = () =>
   new Promise<void>((resolve) => {
@@ -78,8 +183,7 @@ export default function CorridorScene() {
       host.appendChild(renderer.domElement);
 
       const scene = new Scene();
-      const fog = new Fog(0x000000, FOG_NEAR, FOG_FAR);
-      scene.fog = fog;
+      scene.fog = new Fog(0x000000, FOG_NEAR, FOG_FAR);
       const camera = new PerspectiveCamera(62, 1, 0.1, LENGTH + 10);
       const unit = new PlaneGeometry(1, 1);
       cleanups.push(() => unit.dispose());
@@ -135,77 +239,81 @@ export default function CorridorScene() {
         return pool[counter++ % pool.length];
       };
 
-      // The entrance. Editorial's page is pulled down the tunnel, and these are
-      // the walls it leaves behind: four tan surfaces just outside the panels,
-      // streaked along their length as if the paper had been dragged. They
-      // take the scene's fog, so they darken with distance, and go fully
-      // black as the entrance completes. See Corridor.tsx.
-      const skinTex = (() => {
-        const c = document.createElement("canvas");
-        c.width = 64;
-        c.height = 512;
-        const g = c.getContext("2d")!;
-        g.fillStyle = "#dccdb0";
-        g.fillRect(0, 0, 64, 512);
-        const rnd = (n: number) => {
-          const v = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-          return v - Math.floor(v);
-        };
-        // Streaks run the length of the tunnel (across this texture's width).
-        for (let i = 0; i < 150; i++) {
-          const pick = rnd(i + 0.5);
-          g.fillStyle =
-            pick < 0.08
-              ? `rgba(196,0,29,${0.25 + rnd(i) * 0.3})`
-              : pick < 0.14
-                ? `rgba(255,77,0,${0.25 + rnd(i) * 0.3})`
-                : `rgba(10,7,7,${0.04 + rnd(i) * 0.2})`;
-          g.fillRect(0, rnd(i + 0.2) * 512, 64, 0.6 + rnd(i + 0.7) * 2.6);
+      // The entrance. Editorial's last screen, as a texture, on a sheet of
+      // vertical ribbons that starts as the flat page filling the screen. The
+      // vertex shader takes it from there: the bottom comes loose and ripples,
+      // the ribbons are drawn into the depth, and they come to rest laid along
+      // the tunnel's walls, floor and ceiling. See Corridor.tsx for the timing.
+      const blank = document.createElement("canvas");
+      blank.width = blank.height = 2;
+      let pageTex = new CanvasTexture(corridorState.page ?? blank);
+      pageTex.colorSpace = SRGBColorSpace;
+      let pageSeen = -1;
+      const ribbonMat = new ShaderMaterial({
+        vertexShader: RIBBON_VERT,
+        fragmentShader: RIBBON_FRAG,
+        side: DoubleSide,
+        uniforms: {
+          uP: { value: 0 },
+          uTime: { value: 0 },
+          uN: { value: 1 },
+          uPage: { value: [1, 1] },
+          uD0: { value: 4 },
+          uTun: { value: [1, 1] },
+          uFar: { value: -(LENGTH - 10) },
+          uMap: { value: pageTex },
+          uFade: { value: 1 },
+          uFog: { value: [FOG_NEAR, FOG_FAR] },
+        },
+      });
+      cleanups.push(() => {
+        ribbonMat.dispose();
+        pageTex.dispose();
+      });
+      let ribbons: Mesh | null = null;
+      const buildRibbons = (aspect: number) => {
+        if (ribbons) {
+          scene.remove(ribbons);
+          ribbons.geometry.dispose();
         }
-        const tex = new CanvasTexture(c);
-        tex.colorSpace = SRGBColorSpace;
-        tex.wrapS = RepeatWrapping;
-        renderer.initTexture(tex);
-        cleanups.push(() => tex.dispose());
-        return tex;
-      })();
-      const skinMat = new MeshBasicMaterial({ map: skinTex, toneMapped: false, side: DoubleSide });
-      cleanups.push(() => skinMat.dispose());
-      let skins: Mesh | null = null;
-      const buildSkins = (aspect: number) => {
-        if (skins) {
-          scene.remove(skins);
-          skins.geometry.dispose();
+        const n = aspect < 0.8 ? 6 : 14;
+        const rows = aspect < 0.8 ? 34 : 46;
+        const strip: number[] = [];
+        const side: number[] = [];
+        const along: number[] = [];
+        const index: number[] = [];
+        for (let i = 0; i < n; i++) {
+          const base = strip.length;
+          for (let k = 0; k <= rows; k++) {
+            strip.push(i, i);
+            side.push(-0.5, 0.5);
+            along.push(k / rows, k / rows);
+            if (k < rows) {
+              const o = base + k * 2;
+              index.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
+            }
+          }
         }
-        // A cross-section with exactly the screen's shape, so the page that
-        // recedes down it is a plain uniform scale of the screen.
-        const hs = Math.max(H, W / aspect) + 0.06;
-        const ws = hs * aspect;
-        corridorState.d0 = hs / 2 / Math.tan((baseFov * Math.PI) / 360);
-        const x = ws / 2;
-        const y = hs / 2;
-        const z0 = 2;
-        const z1 = -LENGTH;
-        const reps = (z0 - z1) / 9;
-        const pos: number[] = [];
-        const uv: number[] = [];
-        // Each wall is one quad: a and b are its two long edges.
-        const wall = (ax: number, ay: number, bx: number, by: number) => {
-          pos.push(ax, ay, z0, ax, ay, z1, bx, by, z1, ax, ay, z0, bx, by, z1, bx, by, z0);
-          uv.push(0, 0, reps, 0, reps, 1, 0, 0, reps, 1, 0, 1);
-        };
-        wall(-x, -y, x, -y); // floor
-        wall(x, y, -x, y); // ceiling
-        wall(-x, y, -x, -y); // left
-        wall(x, -y, x, y); // right
         const geo = new BufferGeometry();
-        geo.setAttribute("position", new Float32BufferAttribute(pos, 3));
-        geo.setAttribute("uv", new Float32BufferAttribute(uv, 2));
-        skins = new Mesh(geo, skinMat);
-        skins.visible = false;
-        scene.add(skins);
+        geo.setAttribute("position", new Float32BufferAttribute(new Float32Array(strip.length * 3), 3));
+        geo.setAttribute("aStrip", new Float32BufferAttribute(strip, 1));
+        geo.setAttribute("aSide", new Float32BufferAttribute(side, 1));
+        geo.setAttribute("aV", new Float32BufferAttribute(along, 1));
+        geo.setIndex(index);
+        // The page sits at the depth where it exactly fills the screen.
+        const d0 = 4;
+        const hs = 2 * d0 * Math.tan((baseFov * Math.PI) / 360);
+        const u = ribbonMat.uniforms;
+        u.uN.value = n;
+        u.uD0.value = d0;
+        u.uPage.value = [hs * aspect, hs];
+        u.uTun.value = [W, H];
+        ribbons = new Mesh(geo, ribbonMat);
+        ribbons.frustumCulled = false;
+        ribbons.renderOrder = 2;
+        scene.add(ribbons);
       };
-      cleanups.push(() => skins?.geometry.dispose());
+      cleanups.push(() => ribbons?.geometry.dispose());
 
       const layout = (aspect: number) => {
         panels.clear();
@@ -287,7 +395,7 @@ export default function CorridorScene() {
         camera.fov = baseFov;
         camera.updateProjectionMatrix();
         rails();
-        buildSkins(aspect);
+        buildRibbons(aspect);
       };
 
       // Structure: corner rails and ribs, so the depth reads even between panels.
@@ -317,6 +425,7 @@ export default function CorridorScene() {
       let zoff = 1.3;
       let sway = 1;
       let lit = 1;
+      let cloth = 0;
       let speed = BASE_SPEED;
       const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
       const mod = (a: number, n: number) => ((a % n) + n) % n;
@@ -345,22 +454,37 @@ export default function CorridorScene() {
         // pulled in (a DOM layer) stays welded to these walls.
         const vac = moving ? corridorState.vac : 1;
         const inside = vac >= 1 ? 1 : 0;
-        const el = entranceLight(vac);
-        fog.near = el.near;
-        fog.far = el.far;
-        // While the walls are still paper there are no panels: they come up
-        // out of the dark once the page has gone.
-        if (el.light !== lit || fades.length) {
-          lit = el.light;
+        // The tunnel's panels come up out of the dark as the ribbons settle.
+        const light = tunnelLight(vac);
+        if (light !== lit || fades.length) {
+          lit = light;
           for (const m of pool) m.color.setScalar(lit * m.userData.fade);
           lineMat.opacity = 0.2 * lit;
         }
         panels.visible = lit > 0.001;
         if (ribs) ribs.visible = panels.visible;
-        if (skins) {
-          skins.visible = el.paper > 0;
-          // The streaks rush inward as the page goes.
-          if (skins.visible) skinTex.offset.x = -Math.pow(vac, 1.55) * 3;
+        if (ribbons) {
+          // A fresh picture of the page?
+          if (corridorState.page && corridorState.pageVersion !== pageSeen) {
+            pageSeen = corridorState.pageVersion;
+            if (pageTex.image !== corridorState.page) {
+              pageTex.dispose();
+              pageTex = new CanvasTexture(corridorState.page);
+              pageTex.colorSpace = SRGBColorSpace;
+              pageTex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+              ribbonMat.uniforms.uMap.value = pageTex;
+            } else {
+              pageTex.dispose();
+              pageTex.needsUpdate = true;
+            }
+          }
+          ribbons.visible = vac < 0.995 && pageSeen >= 0;
+          if (ribbons.visible) {
+            cloth += Math.max(dt, 0);
+            ribbonMat.uniforms.uP.value = vac;
+            ribbonMat.uniforms.uTime.value = cloth;
+            ribbonMat.uniforms.uFade.value = ribbonLight(vac);
+          }
         }
         pointer.x += (pointer.tx - pointer.x) * 0.05;
         pointer.y += (pointer.ty - pointer.y) * 0.05;
@@ -412,6 +536,10 @@ export default function CorridorScene() {
       // Draw now, well before arrival: this is the frame the visitor first sees.
       frame(0);
       host.classList.add("is-live");
+      corridorState.ribbons = true;
+      cleanups.push(() => {
+        corridorState.ribbons = false;
+      });
       if (!moving) return;
 
       const onMove = (e: PointerEvent) => {

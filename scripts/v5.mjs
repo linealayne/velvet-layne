@@ -37,7 +37,8 @@ for (const run of RUNS) {
     page.on("pageerror", (e) => errors.push(String(e)));
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(run.reduced ? 900 : 3200);
+    // Long enough for every letter shader to finish compiling in the background.
+    await page.waitForTimeout(run.reduced ? 2500 : 6500);
 
     const shoot = async (name, clip) => {
       maxOverflow = Math.max(
@@ -85,7 +86,7 @@ for (const run of RUNS) {
       if (!run.reduced) {
         // The first L, held: early, middle and late in the same activation.
         await fire(2);
-        for (const [n, ms] of [[1, 380], [2, 520], [3, 560]]) {
+        for (const [n, ms] of [[1, run.mobile ? 1300 : 420], [2, 520], [3, 560]]) {
           await page.waitForTimeout(ms);
           await shoot(`letter-L-held-${n}`, await rect(2));
         }
@@ -95,7 +96,7 @@ for (const run of RUNS) {
       }
       for (let i = 0; i < 11; i++) {
         await fire(i);
-        await page.waitForTimeout(run.reduced ? 700 : 1150);
+        await page.waitForTimeout(run.reduced ? 900 : run.mobile ? 1700 : 1150);
         await shoot(`letter-${String(i).padStart(2, "0")}-${NAMES[i]}`, await rect(i));
         if (run.mobile && !run.reduced) await page.waitForTimeout(2300);
       }

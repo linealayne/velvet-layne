@@ -627,7 +627,7 @@ html.anim .bridge-iris {
 /* The stage takes over one screen early, on top of Editorial's last screen,
    so the page that is on screen is the page that gets pulled in. */
 html.anim .corridor {
-  height: 470svh;
+  height: 560svh;
   margin-top: -100svh;
 }
 .cor-stage {
@@ -671,7 +671,9 @@ html.anim .cor-stage {
 .no-gl .cor-fallback {
   display: block;
 }
-/* The entrance: a copy of Editorial's last screen, pulled down the tunnel. */
+/* The entrance. For the first instant the stage shows a DOM copy of
+   Editorial's last screen, so the handover from the real page is exact; the
+   WebGL ribbons, textured with the same page, take over as soon as it moves. */
 .vac-page {
   display: none;
 }
@@ -680,37 +682,14 @@ html.anim .vac-page {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  pointer-events: none;
-}
-.vac-layer {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  transform-origin: 50% 50%;
-  will-change: transform, opacity;
-}
-.vac-main {
   background: var(--paper);
-}
-/* Ghosts carry the page's ink only, so the streak falls across the walls. */
-.vac-ghost {
-  opacity: 0;
-}
-.vac-ghost .vac-ed {
-  background: none;
+  pointer-events: none;
 }
 .vac-page .vac-ed {
   position: absolute;
   inset: auto 0 0;
   content-visibility: visible;
   contain-intrinsic-size: none;
-}
-.vac-shade {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  background: #000;
-  opacity: 0;
 }
 .cor-frame {
   position: absolute;
@@ -1499,12 +1478,8 @@ main > .bridge {
 
   /* ── Corridor: the frame fits the width ── */
   html.anim .corridor {
-    height: 400svh;
+    height: 480svh;
     margin-top: -100lvh;
-  }
-  /* One ghost is enough on a phone. */
-  .vac-ghost + .vac-ghost {
-    display: none;
   }
   .cor-frame {
     width: 80vw;

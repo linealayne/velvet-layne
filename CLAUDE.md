@@ -37,7 +37,8 @@ node scripts/captures.mjs                        # re-capture the demo sites
 node scripts/og.mjs [url]                        # regenerate the share card
 node scripts/grain.mjs                           # regenerate the film grain tile
 node scripts/cold.mjs [url] [outDir]             # cold, throttled first visit to the Corridor
-node scripts/v4.mjs [url] [outDir] [run]         # velvet, pillar handoff, vacuum entrance, tracers, finale
+node scripts/v4.mjs [url] [outDir] [run]         # velvet, pillar handoff, tracers, finale
+node scripts/v5.mjs [url] [outDir] [run] [part]  # letters, molten-to-velvet, ribbon entrance
 ```
 
 `scripts/shots.mjs` uses `playwright-core`. It captures the hero at rest,
@@ -64,13 +65,14 @@ set is in `screenshots/`.
 
 Transitions (each pair uses a different one, none may repeat):
 
-1. Hero → Manifesto: the name parts like a curtain, the field blooms through
-   its hues, then cools to black (`Hero.tsx`)
+1. Hero → Manifesto: molten cools into velvet. The name parts like a curtain,
+   the colour field slows and darkens, and the Manifesto's velvet rolls in
+   over it on the diagonal (`Hero.tsx` + `Manifesto.tsx`, see below).
 2. Manifesto → Editorial: `columns`, paper drops in as grid columns. The
    bridge overlaps the end of the Manifesto (negative margin), so the pillars
    start falling the moment the last word has lit.
-3. Editorial → Corridor: the vacuum entrance. The page is pulled down the
-   tunnel and becomes its walls (`Corridor.tsx`, see below).
+3. Editorial → Corridor: the ribbon entrance. The page comes apart into
+   ribbons that are drawn into the tunnel (`Corridor.tsx`, see below).
 4. Corridor → Dimension: `iris`, a red dot opens out of the black. It also
    overlaps the end of the Corridor so there is no black gap before the dot.
 5. Dimension → Brutal: `tiles`, hard-cut blocks, no easing
@@ -86,17 +88,23 @@ Every letter is a trailer for the show. Scenes are drawn in code in
 
 | Letter | Scene id | What plays inside it |
 |--------|----------|----------------------|
-| V | `vinyl` | Macro of a spinning black record, light sliding across the grooves |
-| E | `print` | Screen-print pull: three halftone passes behind a squeegee, off register |
-| L | `pour` | Molten liquid chrome pouring down (shared WebGL) |
-| V | `vhs` | VHS tape: tracking roll, ghosting, running timecode |
-| E | `threads` | The Manifesto thread field, sped up |
-| T | `tunnel` | A tiny Corridor, cards rushing in |
-| L | `sparks` | Welding sparks, hot orange on black |
-| A | `galaxy` | A slowly rotating galaxy |
-| Y | `chrome` | A liquid chrome surface, a 2D echo of the Dimension knot (shared WebGL) |
-| N | `neon` | A red neon tube buzzing and flickering on |
-| E | `blocks` | Website blocks snapping into a layout: what Linea does |
+| V | `vinyl` | Glossy black vinyl spinning, a sharp chrome streak sliding across the grooves |
+| E | `marble` | Oxblood lacquer and liquid chrome marbling into each other |
+| L | `pour` | Molten chrome pouring through the letter, catching orange light |
+| V | `mercury` | Liquid mercury rippling, with the red field in its reflections |
+| E | `velvet` | Crushed oxblood velvet with a moving sheen (ties to the Manifesto) |
+| T | `corridor` | The Corridor in miniature, panels rushing in, glossy |
+| L | `molten` | A white-hot pool of metal with orange sparks skating across it |
+| A | `nebula` | A slow liquid nebula in oxblood, orange and chrome |
+| Y | `chrome` | Liquid chrome with oxblood and orange. **The reference: do not change it.** |
+| N | `neon` | A red neon tube buzzing on, reflected in wet black chrome |
+| E | `blocks` | Glossy chrome and lacquer blocks snapping into a layout: what Linea does |
+
+All eleven are glossy, liquid materials in the palette, written as fragment
+shaders in `src/lib/letterShader.ts`. The older 2D drawings of each letter
+(`vinyl`, `print`, `vhs`, `threads`, ... in `scenes.ts`) are kept for two
+jobs only: they are what a letter shows where WebGL is not available at all,
+and the finale's tiles are still frames of them.
 
 How it works:
 
@@ -130,14 +138,29 @@ How it works:
   again to the diagonal slice, and calls `scene.draw(ctx, w, h, t)`. Idle
   letters do no work and the loop stops when no letter is active. When a scene
   has wiped out, the worker posts `idle` and the page shows the SVG again.
-- Scenes pre-render their static parts once (`cached()`) and blit them, so a
-  frame is a handful of draw calls. Keep it that way.
-- Wipe in 250ms, hold 500ms after leave, wipe out 250ms. Several letters can
-  be active at once.
-- The two chrome scenes render through ONE shared offscreen WebGL canvas
-  (`warmChrome()` in `scenes.ts`) and are copied in with `drawImage`. Never
-  create a WebGL context per letter. On touch devices they use a 2D version
-  instead (`setLite`), so phones never open a second WebGL context.
+- **One shared WebGL context, one small program per letter.** `scenes.ts`
+  owns a single offscreen WebGL canvas (304px, never resized). Each letter
+  has its own shader program; to draw, the engine binds that program, renders
+  into a corner of the shared canvas and copies it into the letter's 2D
+  canvas with `drawImage`. Never create a WebGL context per letter. This runs
+  the same way in the worker, on the main thread, and on phones.
+- **Why eleven programs and not one.** `letterFrag(kind)` builds a letter's
+  shader by replacing every `K(n.)` in the shared source with a literal true
+  or false, so the compiler discards the other ten scenes. As one program
+  with the letter picked by a uniform, it took over 100 seconds to link on
+  Intel graphics (the driver flattens every branch) and the letters stayed
+  blank. Constant-folded, each links in well under half a second.
+- The programs compile in the background, one after another
+  (`warmShader()`, about two seconds after load), asynchronously.
+- **A letter never shows a stand-in.** `scene.ready()` is false while that
+  letter's program is compiling, and the engine does not start the letter
+  until it is true. Whether a letter draws with WebGL or with its 2D fallback
+  is decided once, the first time it draws, and never changes.
+  - This is the fix for "the L starts as one scene and then switches". The
+    cause: the two chrome letters (the first L and the Y) used to draw a 2D
+    stand-in (a sliding reflection strip) while the shared shader was still
+    compiling, then swapped to the real shader scene as soon as it was ready,
+    in the middle of an activation. No letter can do that now.
 - Touch screens: letters fire on their own, one at a time, about every 2.3s in
   a shuffled order with no immediate repeat. Tapping a letter fires it at once.
   Steady scenes repaint at half rate there.
@@ -146,7 +169,8 @@ How it works:
   width is too narrow to show a scene. The letters are outlines that stretch,
   so this costs nothing. `Hero.tsx` sizes the canvas for the final width
   before the letter opens.
-- Reduced motion: hover shows one still frame (`scene.still`), no wipe.
+- Reduced motion: hover shows one still frame (`scene.still`), no wipe (it
+  also waits for the letter's program).
 - Letters lock (no hover, no auto-fire) once the page has scrolled a little.
 
 ### The Corridor
@@ -166,22 +190,36 @@ How it works:
 - In portrait (aspect under 0.8) the tunnel is narrower and taller with a
   wider field of view, one lane on the floor and ceiling, and fewer, larger
   panels spaced further apart so each can be read on a phone.
-- **The entrance (do not turn this back into a fade).** The Corridor's stage
-  takes over one screen early, on top of Editorial's last screen
-  (`margin-top: -100svh`). `.vac-page` is a copy of exactly what Editorial is
-  showing at that moment, cloned from the real DOM. Scrolling scales that
-  page about the centre by `exp(-4.3 * p^1.55)`, which is how a wall recedes
-  down the tunnel, while `CorridorScene` draws four tan, streaked walls
-  (`skins`) whose cross-section has exactly the screen's shape. So the page's
-  edges stay welded to the walls: the page becomes the tunnel. Two fainter
-  copies of the page's ink lag behind it as a motion streak.
-  `entranceLight(p)` in `lib/corridorState.ts` drives the light for both
-  halves: the fog closes in from the far end (the centre of the screen
-  outward) until everything is black, then opens on the real tunnel, and
-  only then do the panels come up. The panels are hidden while the walls are
-  paper, so the tunnel never shows through the tan. The camera holds still
-  during the entrance. Scrubbed and fully reversible. Reduced motion: no
-  entrance at all, a clean cut to a still frame.
+- **The ribbon entrance (do not turn it back into a fade, a shrinking page or
+  speed lines).** The Corridor's stage takes over one screen early, on top of
+  Editorial's last screen (`margin-top: -100svh`), and the entrance is the
+  first 30% of the chapter's scroll (`ENTRANCE` in `Corridor.tsx`).
+  - **The page as a texture.** `lib/pageTexture.ts` redraws Editorial's last
+    screen into a canvas from the DOM's own measurements: each word where the
+    browser put it (a `Range` per word), in its computed font; the step
+    rules; and the plates rasterised from their own SVG markup. It is
+    repainted at the moment of takeover (`capture()`), and handed to the scene
+    through `corridorState.page`.
+  - **The ribbons.** `CorridorScene` draws that texture on a sheet of vertical
+    strips (14, or 6 wider ones in portrait) that at rest is exactly the flat
+    page filling the screen. One vertex shader (`RIBBON_VERT`) does the rest
+    from the progress `uP`: a cut climbs from the bottom edge and the strips
+    below it hang loose and ripple; then each strip is drawn into the depth,
+    loose end first, gathering toward the centre line, waving and turning
+    about its own length; and it comes to rest laid along a wall, the floor or
+    the ceiling of the tunnel, running into the distance. It uses the
+    tunnel's own renderer; there is no second context.
+  - **The light.** A ribbon loses its light as it is laid along the tunnel
+    (`vShade`), and `ribbonLight` / `tunnelLight` in `lib/corridorState.ts`
+    take the last of the paper down while the tunnel's panels come up. The
+    stretched paper is therefore never seen bright. Keep it that way: bright,
+    stretched stripes read as radial speed lines.
+  - The cloth also moves on its own (`uTime`), the camera holds still during
+    the entrance, and everything is scrubbed and reversible.
+  - For the first instant (`p < 0.004`) the stage shows a DOM copy of the page
+    (`.vac-page`) so the handover from the real Editorial is exact. Without
+    WebGL that copy simply fades into the dark.
+  - Reduced motion: no entrance at all, a clean cut to a still frame.
 - **It must be populated the instant it comes on screen, on a first visit.**
   How that is guaranteed:
   1. `lib/corridorAssets.ts` `preloadCorridor()` runs once the hero has
@@ -200,10 +238,23 @@ How it works:
   Check it with `node scripts/cold.mjs` (cache off, Fast 4G).
 - Reduced motion: one still frame of the tunnel.
 
-### Manifesto background: velvet
+### Manifesto: velvet, and how it arrives
 
 A raw WebGL fragment shader in `Manifesto.tsx`, written for this page.
 
+- **Molten cools into velvet (the entrance).** The chapter has
+  `margin-top: -230svh`, so its sticky stage takes over while the hero is
+  still pinned, fully transparent at first. Over the next 1.15 screens
+  (`SETTLE`) the velvet rolls in: `uSettle` moves a soft diagonal front
+  across the frame, shaped by the folds themselves and faintly warm at its
+  leading edge, while the cloth is still shifting and then comes to rest.
+  Underneath, the hero slows its colour field (`FieldState.cool`, which only
+  scales the field's clock) and dims it. One material becomes the other:
+  there is no black frame and no hard edge. The type fades in as the cloth
+  lands and the first word lights straight away. The chapter takes no
+  pointer events (it overlaps the hero's letters), so the brush listens on
+  the window. Reduced motion: the velvet fades softly in over the foot of the
+  hero with a CSS mask.
 - **The cloth.** A heightfield of long, leaning folds (domain-warped noise,
   stretched along one axis) drifts very slowly. It is lit the way pile fabric
   is lit: nearly black where it faces you, glowing oxblood on its slopes
@@ -218,7 +269,7 @@ A raw WebGL fragment shader in `Manifesto.tsx`, written for this page.
 - Cursor on desktop; finger drag on touch (`touchmove` on the stage, passive,
   so scrolling is untouched).
 - Half resolution (0.45 on phones), 4 noise octaves (3 on phones), async
-  shader compile, loop stops off screen. Reduced motion: one still frame.
+  shader compile. The loop only runs once the stage has taken over. Reduced motion: one still frame.
 - Before the shader is ready, and without WebGL, the stage shows a dark
   oxblood gradient.
 - The word reveal ends exactly where the pillars begin to fall. If the bridge
@@ -235,8 +286,8 @@ must not be changed to fix a phone problem; use the phone block.
   `svh`, so it does not jump when the bar comes and goes.
 - **Scrolling.** Lenis is not created on touch devices at all
   (`SmoothScroll.tsx`). Native scrolling is left alone.
-- **Hero.** Main-thread engine in WebKit, letters open wider when lit, cue at
-  15px.
+- **Hero.** Main-thread engine in WebKit (with the same shared WebGL canvas
+  for the scenes), letters open wider when lit, cue at 15px.
 - **Manifesto.** Type up to 20vw, balanced into short lines. Lighter velvet
   shader; a finger drag brushes it.
 - **Editorial.** One column per step: numeral, heading and text, then the
