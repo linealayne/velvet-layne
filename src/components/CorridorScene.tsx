@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import {
   BufferGeometry,
   CanvasTexture,
-  DoubleSide,
+  Color,
   Float32BufferAttribute,
   Fog,
   Group,
@@ -21,117 +21,132 @@ import {
 } from "three";
 import { ScrollTrigger, scrollState, calm, motionOn, isSmall } from "@/lib/gsap";
 import { preloadCorridor } from "@/lib/corridorAssets";
-import { corridorState, ribbonLight, tunnelLight, FOG_FAR, FOG_NEAR } from "@/lib/corridorState";
+import { corridorState, FOG_FAR, FOG_NEAR, HOLE_OPENS } from "@/lib/corridorState";
 
 const LENGTH = 52; // how far the tunnel runs before a panel wraps
 const BASE_SPEED = 6.5; // units per second, always
 
 type Slot = { mesh: Mesh; base: number; lap: number; shape: "port" | "land" };
 
-const RIBBON_VERT = /* glsl */ `
-attribute float aStrip;
-attribute float aSide;
-attribute float aV;
+/** The sheet's radius, in half-diagonals of the screen. */
+const SHEET = 1.32;
+
+/**
+ * The suction entrance. The page is printed on a sheet stretched across the
+ * mouth of the tunnel: a disc of fine rings around the exact centre of the
+ * screen, larger than the screen, blank paper beyond the page's own edges.
+ * Each vertex knows where it lies on the flat sheet (`q0`); the shader moves
+ * it the way a sheet moves into a drain:
+ *   - a dent: the centre is pushed back in depth with a smooth radial falloff;
+ *   - a sink: the sheet flows inward. Area flows in at one rate everywhere
+ *     (r squared falls by the same amount), so the centre goes first and
+ *     fastest and the edges of the page are dragged in last;
+ *   - a throat: what has passed the rim of the hole runs down into the depth,
+ *     darkening, and is gone. The hole is a true hole: the tunnel behind is
+ *     seen through it.
+ * At uP = 0 it is exactly the flat page filling the screen.
+ */
+const SHEET_VERT = /* glsl */ `
 uniform float uP;
-uniform float uTime;
-uniform float uN;
 uniform vec2 uPage;
 uniform float uD0;
-uniform vec2 uTun;
-uniform float uFar;
+uniform float uRc;
+uniform vec3 uShake;
 varying vec2 vUv;
 varying float vShade;
-varying float vDepth;
+varying float vAlpha;
 
-float hash1(float n){return fract(sin(n*127.1+3.7)*43758.5453);}
+float ramp(float a,float b,float x){return clamp((x-a)/(b-a),0.,1.);}
 
 void main(){
-  float n=uN,i=aStrip;
-  float u0=(i+.5)/n;
-  float sw=uPage.x/n;
-  float seed=hash1(i);
+  float t=length(position.xy);
+  vec2 dir=t>1e-5?position.xy/t:vec2(1.,0.);
+  float r0=uRc*SHEET*pow(t,1.12);
+  vec2 q0=dir*r0;
+  vUv=q0/uPage+.5;
+  float rc2=uRc*uRc;
+  float r2=r0*r0;
 
-  // 0. The flat page, exactly filling the screen. It eases back a little so
-  //    the dark can open around it.
-  float back=.8*smoothstep(0.,.34,uP);
-  vec3 P0=vec3((u0-.5)*uPage.x,(aV-.5)*uPage.y,-uD0-back);
+  // The dent: gentle at first, then it accelerates. Once the hole is wide
+  // the funnel shallows, so its mouth opens out toward the screen.
+  float g=ramp(.1,.66,uP);
+  float D=3.4*g*g*(1.-.72*smoothstep(.5,.85,uP));
+  float w=uRc*(.13+.2*g);
 
-  // 1. Coming loose. A cut climbs from the bottom edge; below it each strip
-  //    hangs free and ripples in a light draft.
-  float c=.46*smoothstep(0.,.24,uP)+.62*smoothstep(.2,.5,uP);
-  float l=smoothstep(c,c-.07,aV);
-  float hang=min(max(c-aV,0.),.5)*l*uPage.y;
-  float w1=sin(uTime*1.05+seed*6.28+aV*6.)*.6+sin(uTime*.63+seed*11.+aV*11.)*.4;
-  float w2=cos(uTime*.85+seed*9.4+aV*5.);
-  P0.x+=w1*hang*.085;
-  P0.z+=(w2*.5+.55)*hang*.26;
-  P0.y-=hang*.07;
-  float narrow=1.-.13*l;
+  // The sink. Q is how much of the sheet (as r squared) has been swallowed.
+  float s=ramp(.26,.93,uP);
+  float Q=QMAX*rc2*pow(s,2.2);
+  // The hole: nothing at first, then the dark opens at the centre.
+  float open=smoothstep(HOLE,HOLE+.16,uP);
+  float a2=Q*.85*open;
+  float a=sqrt(a2);
 
-  // 2. Pulled into the depth, loose end first.
-  float pp=clamp((uP-.22)/.56,0.,1.);
-  float r=smoothstep(0.,1.,pp*2.15-aV*1.15);
-
-  // 3. Where this ribbon comes to rest: laid along a wall, the floor or the
-  //    ceiling of the tunnel, running away into the distance.
-  float nw=floor(n*.22+.5);
-  float m=n-2.*nw;
-  vec3 X;vec3 T;vec3 Nrm;float wd;
-  if(i<nw){
-    X=vec3(-uTun.x*.4925,((i+.5)/nw-.5)*uTun.y,0.);T=vec3(0.,1.,0.);Nrm=vec3(1.,0.,0.);wd=uTun.y/nw;
-  }else if(i>=n-nw){
-    float j=i-(n-nw);
-    X=vec3(uTun.x*.4925,((j+.5)/nw-.5)*uTun.y,0.);T=vec3(0.,1.,0.);Nrm=vec3(-1.,0.,0.);wd=uTun.y/nw;
+  float sig2=r2-Q;
+  float rho;float depth;float thr=0.;
+  if(sig2>=0.){
+    // Still on the sheet, drawn in toward the drain.
+    rho=sqrt(sig2+a2);
+    depth=D*exp(-sig2/(w*w));
   }else{
-    float j=i-nw;
-    float top=mod(j,2.);
-    float half_=ceil(m*.5);
-    float k=floor(j*.5);
-    X=vec3(((k+.5)/half_-.5)*uTun.x,(top<.5?-1.:1.)*uTun.y*.4925,0.);
-    T=vec3(1.,0.,0.);Nrm=vec3(0.,top<.5?1.:-1.,0.);wd=uTun.x/half_;
+    // Past the rim: down the throat.
+    thr=min(-sig2/(.22*rc2),1.);
+    rho=a*(1.-.3*thr);
+    depth=D+3.6*thr;
   }
-  vec3 P2=vec3(X.xy,mix(uFar,1.5,aV));
 
-  // On the way, the ribbons gather toward the centre line and wave.
-  float mid=sin(3.14159*r);
-  vec3 P=mix(P0,P2,r);
-  P.xy*=1.-.66*mid;
-  float a=uTime*1.2+seed*20.+aV*7.;
-  P.x+=sin(a)*.3*mid;
-  P.y+=cos(a*.83+1.3)*.24*mid;
+  vec2 p=dir*rho;
+  // The tremor: a tiny offset and turn of the whole sheet.
+  float cr=cos(uShake.z),sr=sin(uShake.z);
+  p=vec2(p.x*cr-p.y*sr,p.x*sr+p.y*cr)+uShake.xy;
 
-  // Twist: the strip turns about its own length while it is free.
-  float tw=mid*sin(uTime*.9+seed*15.+aV*4.5)*1.2+l*(1.-r)*w2*.5;
-  vec3 side=normalize(mix(vec3(1.,0.,0.),T,r));
-  vec3 tv=normalize(mix(vec3(0.,0.,1.),Nrm,r));
-  side=normalize(side*cos(tw)+tv*sin(tw));
-  P+=side*aSide*mix(sw*narrow,wd*.94,r);
+  // Paper darkens as it stretches down into the funnel.
+  // By the rim it is in shadow, and it is black before it thins away, so
+  // no pale paper ever lies over the tunnel.
+  float sink=clamp(depth/3.4,0.,1.);
+  float lip=sig2>=0.?exp(-sig2/(w*w)):1.;
+  vShade=mix(1.,.2,max(pow(sink,.85),.85*lip*open));
+  // The walls of the dent catch the light on one side.
+  float slope=sig2>=0.?2.*sqrt(sig2)/(w*w)*depth:0.;
+  vShade*=1.-.24*clamp(slope*.5,0.,1.)*dot(dir,vec2(-.58,.81));
+  vShade*=1.-smoothstep(0.,.3,thr);
+  vAlpha=1.-smoothstep(.28,.8,thr);
 
-  vShade=(1.-.32*abs(sin(tw)))*(1.-.22*l*(1.-r)*(.5-.5*w2));
-  // A ribbon gives up its light as it is laid along the tunnel, so the
-  // stretched paper is never seen bright: it settles into the dark walls.
-  vShade*=1.-.9*smoothstep(.42,.94,r);
-  vUv=vec2((i+.5+aSide)/n,aV);
-  vec4 mv=modelViewMatrix*vec4(P,1.);
-  vDepth=-mv.z;
-  gl_Position=projectionMatrix*mv;
+  gl_Position=projectionMatrix*modelViewMatrix*vec4(p,-uD0-depth,1.);
 }`;
 
-const RIBBON_FRAG = /* glsl */ `
+const SHEET_FRAG = /* glsl */ `
 uniform sampler2D uMap;
-uniform float uFade;
-uniform vec2 uFog;
+uniform vec3 uPaper;
+uniform float uGrain;
+uniform float uEdge;
+uniform float uSeed;
 varying vec2 vUv;
 varying float vShade;
-varying float vDepth;
+varying float vAlpha;
+float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
 void main(){
-  vec3 c=texture2D(uMap,vUv).rgb;
-  c*=vShade*(gl_FrontFacing?1.:.8);
-  // The tunnel's own fog, then the last of the paper's light going out.
-  c*=(1.-smoothstep(uFog.x,uFog.y,vDepth))*uFade;
-  gl_FragColor=vec4(c,1.);
+  if(vAlpha<.004)discard;
+  // Beyond the page's own edge the sheet is blank paper.
+  vec2 in2=step(vec2(0.),vUv)*step(vUv,vec2(1.));
+  vec3 c=mix(uPaper,texture2D(uMap,clamp(vUv,0.,1.)).rgb,in2.x*in2.y);
+  // While it trembles the edges darken a little and the grain comes up.
+  c*=1.-uEdge*smoothstep(.3,.74,length(vUv-.5));
+  c+=(hash(gl_FragCoord.xy+uSeed)-.5)*uGrain;
+  gl_FragColor=vec4(c*vShade,vAlpha);
   #include <colorspace_fragment>
 }`;
+
+// The whole sheet (and the last of its throat) must be gone by the end.
+const QMAX = SHEET * SHEET + 0.3;
+const sheetVert = SHEET_VERT.replaceAll("QMAX", QMAX.toFixed(3))
+  .replaceAll("SHEET", SHEET.toFixed(3))
+  .replaceAll("HOLE", HOLE_OPENS.toFixed(3));
+const sheetFrag = SHEET_FRAG;
+
+const smooth = (a: number, b: number, v: number) => {
+  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 const pause = () =>
   new Promise<void>((resolve) => {
@@ -239,81 +254,75 @@ export default function CorridorScene() {
         return pool[counter++ % pool.length];
       };
 
-      // The entrance. Editorial's last screen, as a texture, on a sheet of
-      // vertical ribbons that starts as the flat page filling the screen. The
-      // vertex shader takes it from there: the bottom comes loose and ripples,
-      // the ribbons are drawn into the depth, and they come to rest laid along
-      // the tunnel's walls, floor and ceiling. See Corridor.tsx for the timing.
+      // The entrance: Editorial's last screen, as a texture, on a sheet that
+      // rides with the camera and at rest exactly fills the screen. It is the
+      // front-most thing (no depth test), drawn after the tunnel.
       const blank = document.createElement("canvas");
       blank.width = blank.height = 2;
       let pageTex = new CanvasTexture(corridorState.page ?? blank);
       pageTex.colorSpace = SRGBColorSpace;
       let pageSeen = -1;
-      const ribbonMat = new ShaderMaterial({
-        vertexShader: RIBBON_VERT,
-        fragmentShader: RIBBON_FRAG,
-        side: DoubleSide,
+      const D0 = 4;
+      const paper = new Color(
+        getComputedStyle(document.documentElement).getPropertyValue("--paper").trim() || "#d9c8a9"
+      );
+      const sheetMat = new ShaderMaterial({
+        vertexShader: sheetVert,
+        fragmentShader: sheetFrag,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
         uniforms: {
           uP: { value: 0 },
-          uTime: { value: 0 },
-          uN: { value: 1 },
           uPage: { value: [1, 1] },
-          uD0: { value: 4 },
-          uTun: { value: [1, 1] },
-          uFar: { value: -(LENGTH - 10) },
+          uD0: { value: D0 },
+          uRc: { value: 1 },
+          uShake: { value: [0, 0, 0] },
           uMap: { value: pageTex },
-          uFade: { value: 1 },
-          uFog: { value: [FOG_NEAR, FOG_FAR] },
+          uPaper: { value: paper },
+          uGrain: { value: 0 },
+          uEdge: { value: 0 },
+          uSeed: { value: 0 },
         },
       });
-      cleanups.push(() => {
-        ribbonMat.dispose();
-        pageTex.dispose();
-      });
-      let ribbons: Mesh | null = null;
-      const buildRibbons = (aspect: number) => {
-        if (ribbons) {
-          scene.remove(ribbons);
-          ribbons.geometry.dispose();
-        }
-        const n = aspect < 0.8 ? 6 : 14;
-        const rows = aspect < 0.8 ? 34 : 46;
-        const strip: number[] = [];
-        const side: number[] = [];
-        const along: number[] = [];
+      // A disc of rings around the centre: the pull is radial, so the mesh is.
+      // Phones get a coarser one.
+      const sheetGeo = (() => {
+        const rings = small ? 56 : 104;
+        const sectors = small ? 72 : 144;
+        const pos: number[] = [];
         const index: number[] = [];
-        for (let i = 0; i < n; i++) {
-          const base = strip.length;
-          for (let k = 0; k <= rows; k++) {
-            strip.push(i, i);
-            side.push(-0.5, 0.5);
-            along.push(k / rows, k / rows);
-            if (k < rows) {
-              const o = base + k * 2;
-              index.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
-            }
+        for (let r = 0; r <= rings; r++) {
+          for (let k = 0; k <= sectors; k++) {
+            const th = (k / sectors) * Math.PI * 2;
+            pos.push((Math.cos(th) * r) / rings, (Math.sin(th) * r) / rings, 0);
+          }
+        }
+        const row = sectors + 1;
+        for (let r = 0; r < rings; r++) {
+          for (let k = 0; k < sectors; k++) {
+            const o = r * row + k;
+            index.push(o, o + row, o + 1, o + 1, o + row, o + row + 1);
           }
         }
         const geo = new BufferGeometry();
-        geo.setAttribute("position", new Float32BufferAttribute(new Float32Array(strip.length * 3), 3));
-        geo.setAttribute("aStrip", new Float32BufferAttribute(strip, 1));
-        geo.setAttribute("aSide", new Float32BufferAttribute(side, 1));
-        geo.setAttribute("aV", new Float32BufferAttribute(along, 1));
+        geo.setAttribute("position", new Float32BufferAttribute(pos, 3));
         geo.setIndex(index);
-        // The page sits at the depth where it exactly fills the screen.
-        const d0 = 4;
-        const hs = 2 * d0 * Math.tan((baseFov * Math.PI) / 360);
-        const u = ribbonMat.uniforms;
-        u.uN.value = n;
-        u.uD0.value = d0;
-        u.uPage.value = [hs * aspect, hs];
-        u.uTun.value = [W, H];
-        ribbons = new Mesh(geo, ribbonMat);
-        ribbons.frustumCulled = false;
-        ribbons.renderOrder = 2;
-        scene.add(ribbons);
-      };
-      cleanups.push(() => ribbons?.geometry.dispose());
+        return geo;
+      })();
+      const sheet = new Mesh(sheetGeo, sheetMat);
+      sheet.frustumCulled = false;
+      sheet.renderOrder = 5;
+      sheet.visible = false;
+      scene.add(camera);
+      camera.add(sheet);
+      cleanups.push(() => {
+        sheetMat.dispose();
+        sheetGeo.dispose();
+        pageTex.dispose();
+      });
+
+
 
       const layout = (aspect: number) => {
         panels.clear();
@@ -395,7 +404,6 @@ export default function CorridorScene() {
         camera.fov = baseFov;
         camera.updateProjectionMatrix();
         rails();
-        buildRibbons(aspect);
       };
 
       // Structure: corner rails and ribs, so the depth reads even between panels.
@@ -424,8 +432,10 @@ export default function CorridorScene() {
 
       let zoff = 1.3;
       let sway = 1;
-      let lit = 1;
-      let cloth = 0;
+      let dimmed = false;
+      let stir = 0;
+      let seed = 0;
+      const shake = [0, 0, 0];
       let speed = BASE_SPEED;
       const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
       const mod = (a: number, n: number) => ((a % n) + n) % n;
@@ -450,42 +460,34 @@ export default function CorridorScene() {
           fades[i].userData.fade = c;
           if (c >= 1) fades.splice(i, 1);
         }
-        // During the entrance the camera holds dead still, so the page being
-        // pulled in (a DOM layer) stays welded to these walls.
         const vac = moving ? corridorState.vac : 1;
         const inside = vac >= 1 ? 1 : 0;
-        // The tunnel's panels come up out of the dark as the ribbons settle.
-        const light = tunnelLight(vac);
-        if (light !== lit || fades.length) {
-          lit = light;
-          for (const m of pool) m.color.setScalar(lit * m.userData.fade);
-          lineMat.opacity = 0.2 * lit;
+        if (fades.length || dimmed) {
+          dimmed = fades.length > 0;
+          for (const m of pool) m.color.setScalar(m.userData.fade);
         }
-        panels.visible = lit > 0.001;
+        // A fresh picture of the page?
+        if (corridorState.page && corridorState.pageVersion !== pageSeen) {
+          pageSeen = corridorState.pageVersion;
+          pageTex.dispose();
+          if (pageTex.image !== corridorState.page) {
+            pageTex = new CanvasTexture(corridorState.page);
+            pageTex.colorSpace = SRGBColorSpace;
+            pageTex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+            sheetMat.uniforms.uMap.value = pageTex;
+          } else {
+            pageTex.needsUpdate = true;
+          }
+          corridorState.sheet = true;
+        }
+        sheet.visible = moving && pageSeen >= 0 && vac < 0.94;
+        // Until the hole opens the sheet covers everything: the tunnel behind
+        // it runs on, but need not be drawn. It is drawn, complete and lit,
+        // from just before the dark opens.
+        panels.visible = !sheet.visible || vac > HOLE_OPENS - 0.05;
         if (ribs) ribs.visible = panels.visible;
-        if (ribbons) {
-          // A fresh picture of the page?
-          if (corridorState.page && corridorState.pageVersion !== pageSeen) {
-            pageSeen = corridorState.pageVersion;
-            if (pageTex.image !== corridorState.page) {
-              pageTex.dispose();
-              pageTex = new CanvasTexture(corridorState.page);
-              pageTex.colorSpace = SRGBColorSpace;
-              pageTex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-              ribbonMat.uniforms.uMap.value = pageTex;
-            } else {
-              pageTex.dispose();
-              pageTex.needsUpdate = true;
-            }
-          }
-          ribbons.visible = vac < 0.995 && pageSeen >= 0;
-          if (ribbons.visible) {
-            cloth += Math.max(dt, 0);
-            ribbonMat.uniforms.uP.value = vac;
-            ribbonMat.uniforms.uTime.value = cloth;
-            ribbonMat.uniforms.uFade.value = ribbonLight(vac);
-          }
-        }
+
+        // During the entrance the camera holds dead still.
         pointer.x += (pointer.tx - pointer.x) * 0.05;
         pointer.y += (pointer.ty - pointer.y) * 0.05;
         sway += (inside - sway) * 0.06;
@@ -496,6 +498,38 @@ export default function CorridorScene() {
           camera.fov = fov;
           camera.updateProjectionMatrix();
         }
+
+        if (sheet.visible) {
+          const u = sheetMat.uniforms;
+          // The sheet fills the screen whatever the lens is doing.
+          const hs = 2 * D0 * Math.tan((camera.fov * Math.PI) / 360);
+          const ws = hs * camera.aspect;
+          u.uPage.value = [ws, hs];
+          u.uRc.value = Math.hypot(ws, hs) / 2;
+          u.uP.value = vac;
+          // The tremor lives on scrolling alone: it follows how hard the page
+          // is being pulled and is exactly zero at rest.
+          const want = Math.min(1, Math.abs(scrollState.velocity) / 900);
+          stir += (want - stir) * (want > stir ? 0.3 : 0.12);
+          if (want < 0.012 && stir < 0.02) stir = 0;
+          const build = smooth(0, 0.34, vac) * (1 - 0.75 * smooth(0.6, 0.9, vac));
+          const amp = stir * build * (small ? 1.15 : 2.2) * (hs / Math.max(1, host.clientHeight));
+          if (amp > 0) {
+            // Irregular, tight, never a swing: a new random pull every frame,
+            // lightly held over from the last.
+            shake[0] += ((Math.random() * 2 - 1) * amp - shake[0]) * 0.7;
+            shake[1] += ((Math.random() * 2 - 1) * amp - shake[1]) * 0.7;
+            shake[2] += ((Math.random() * 2 - 1) * amp * 0.07 - shake[2]) * 0.7;
+            seed = (seed + 17.37) % 289;
+          } else {
+            shake[0] = shake[1] = shake[2] = 0;
+          }
+          u.uShake.value = shake;
+          u.uSeed.value = seed;
+          u.uGrain.value = 0.045 * smooth(0, 0.36, vac);
+          u.uEdge.value = 0.3 * smooth(0.02, 0.42, vac) * (1 - smooth(0.5, 0.8, vac));
+        }
+
         renderer.render(scene, camera);
       };
 
@@ -536,9 +570,8 @@ export default function CorridorScene() {
       // Draw now, well before arrival: this is the frame the visitor first sees.
       frame(0);
       host.classList.add("is-live");
-      corridorState.ribbons = true;
       cleanups.push(() => {
-        corridorState.ribbons = false;
+        corridorState.sheet = false;
       });
       if (!moving) return;
 

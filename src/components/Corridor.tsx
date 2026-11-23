@@ -14,29 +14,33 @@ const CorridorScene = dynamic(() => import("./CorridorScene"), { ssr: false });
 const LINES = ["Walk the work.", "Every wall is mine.", "Nothing borrowed.", "Keep going."];
 
 /** The share of this chapter's scroll that the entrance takes. */
-const ENTRANCE = 0.3;
+const ENTRANCE = 0.32;
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 /**
  * Chapter 4, the centrepiece, and the way into it.
  *
- * The entrance: Editorial's last page comes apart into ribbons and is drawn
- * into the tunnel. This chapter's stage starts one screen early, over the
- * last screen of Editorial. A picture of exactly that screen is painted to a
- * canvas (`lib/pageTexture.ts`) and handed to the three.js scene, which shows
- * it on a sheet of vertical ribbons that at first is simply the flat page.
- * Scrolling then (all in `CorridorScene`'s vertex shader):
- *   - the bottom of the page comes loose in strips that hang and ripple;
- *   - the loose ends are drawn back toward the centre of the screen, waving
- *     and turning, and the pull peels the rest of the page into ribbons;
- *   - the dark opens behind them, the ribbons stretch away and come to rest
- *     along the tunnel's walls, floor and ceiling, and as their light goes
- *     out the tunnel's own panels come up. The frame arrives from the depth.
- * Scroll-scrubbed and fully reversible; the cloth also moves on its own.
+ * The entrance: Editorial's last page is sucked into the tunnel. This
+ * chapter's stage starts one screen early, over the last screen of Editorial.
+ * A picture of exactly that screen is painted to a canvas
+ * (`lib/pageTexture.ts`) and handed to the three.js scene, which shows it on
+ * a sheet that at first is simply the flat page, full screen. Scrolling then
+ * (all in `CorridorScene`'s vertex shader):
+ *   - the page trembles, finely, and only while it is being scrolled;
+ *   - a point at the exact centre pulls it back: the centre sinks in depth and
+ *     everything around bends and stretches toward it, faster and faster;
+ *   - the dark opens at the bottom of the funnel and the tunnel, complete and
+ *     moving, is seen through it; the paper darkens as it runs down the
+ *     throat, the edges are dragged in last, and it is gone;
+ *   - the frame arrives from the depth.
+ * One motion, scroll-scrubbed and fully reversible.
  *
- * For the very first instant the stage shows a DOM copy of the page instead,
- * so the handover from the real Editorial is exact.
+ * Before this chapter's script has taken over (first load, or a refresh part
+ * way down), the stage is empty and see-through, so nothing of the Corridor
+ * can sit on top of Editorial. Once it has (`.is-set`), the stage shows a DOM
+ * copy of the page until the sheet takes over at the first movement, so the
+ * handover from the real Editorial is exact.
  *
  * Loading is front-loaded so nothing is blank on arrival: the panel images
  * are fetched and decoded once the hero has settled (`preloadCorridor`, from
@@ -93,6 +97,7 @@ export default function Corridor() {
       // The copy always shows the plates fully revealed.
       clone.querySelectorAll<HTMLElement>(".plate, .plate svg").forEach((n) => n.removeAttribute("style"));
       slot.replaceChildren(clone);
+      stage.classList.add("is-set");
       const canvas = (corridorState.page ??= document.createElement("canvas"));
       const scale = Math.min(window.devicePixelRatio || 1, isSmall() ? 1.5 : 1.25);
       if (drawEditorialPage(canvas, stage.clientWidth, stage.clientHeight, scale)) corridorState.pageVersion++;
@@ -107,8 +112,8 @@ export default function Corridor() {
       }
       const p = clamp01(P / ENTRANCE);
       corridorState.vac = p;
-      if (corridorState.ribbons) {
-        // The ribbons are the page from the first movement on.
+      if (corridorState.sheet) {
+        // The sheet is the page from the first movement on.
         page.style.visibility = p < 0.004 ? "visible" : "hidden";
         page.style.opacity = "1";
       } else {

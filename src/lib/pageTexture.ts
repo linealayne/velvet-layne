@@ -1,6 +1,6 @@
 /**
  * Draws the last screen of the Editorial chapter into a canvas, so the Corridor
- * entrance can tear that exact page into ribbons.
+ * entrance can pull that exact page into the tunnel.
  *
  * There is no way to ask a browser for a picture of its own DOM, so the page
  * is redrawn from the DOM's own measurements: every word is placed where the

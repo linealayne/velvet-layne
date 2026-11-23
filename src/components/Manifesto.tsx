@@ -135,21 +135,24 @@ export default function Manifesto() {
           and the type appears. ── */
     let settle = moving ? 0 : 1;
     if (moving) {
-      const back = el.querySelector<HTMLElement>(".mf-back")!;
-      const lines = el.querySelector<HTMLElement>(".mf-lines")!;
+      // The backdrop and the type take their opacity from --settle in CSS,
+      // where the default is hidden: this chapter overlaps the hero, and must
+      // show nothing there before this script has run. Until now an inline
+      // script (layout.tsx) has been keeping --settle; take it over.
+      const early = (window as Window & { __mfSettle?: () => void }).__mfSettle;
+      if (early) window.removeEventListener("scroll", early);
       const applySettle = (v: number) => {
         settle = v;
-        back.style.opacity = (v * v).toFixed(3);
-        lines.style.opacity = gsap.utils.clamp(0, 1, (v - 0.7) / 0.3).toFixed(3);
+        el.style.setProperty("--settle", v.toFixed(3));
       };
-      applySettle(0);
-      ScrollTrigger.create({
+      const settling = ScrollTrigger.create({
         trigger: el,
         start: "top top",
         end: () => `+=${Math.round(window.innerHeight * SETTLE)}`,
         onUpdate: (self) => applySettle(self.progress),
         onRefresh: (self) => applySettle(self.progress),
       });
+      applySettle(settling.progress);
     }
 
     /* ── The velvet ── */
@@ -339,6 +342,10 @@ export default function Manifesto() {
         if (on) {
           last = performance.now();
           id = requestAnimationFrame(loop);
+        } else {
+          // Leave the canvas in the state it stops in (above the chapter that
+          // is fully transparent), never a frame behind.
+          draw((performance.now() - t0) / 1000 + 30, 0);
         }
       };
       // The chapter overlaps the hero, so "on screen" starts when its stage

@@ -37,17 +37,22 @@ export default function Editorial() {
     () => {
       if (!motionOn()) return;
 
+      // These play once and are never reversed (the default toggleActions).
+      // They are deliberately not `once: true`: that removes the trigger
+      // from ScrollTrigger's list when it has played, and after a refresh
+      // part way down the page several of them did so in the middle of a
+      // later chapter's refresh, which threw and left that chapter dead.
       gsap.from(".ed-title .line > span", {
         yPercent: 110,
         duration: 1.2,
         ease: "expo.out",
         stagger: 0.09,
-        scrollTrigger: { trigger: ".ed-title", start: "top 82%", once: true },
+        scrollTrigger: { trigger: ".ed-title", start: "top 82%" },
       });
 
       gsap.utils.toArray<HTMLElement>(".plate").forEach((plate, i) => {
         const tl = gsap.timeline({
-          scrollTrigger: { trigger: plate, start: "top 82%", once: true },
+          scrollTrigger: { trigger: plate, start: "top 82%" },
         });
         tl.fromTo(
           plate,

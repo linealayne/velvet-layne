@@ -38,7 +38,8 @@ node scripts/og.mjs [url]                        # regenerate the share card
 node scripts/grain.mjs                           # regenerate the film grain tile
 node scripts/cold.mjs [url] [outDir]             # cold, throttled first visit to the Corridor
 node scripts/v4.mjs [url] [outDir] [run]         # velvet, pillar handoff, tracers, finale
-node scripts/v5.mjs [url] [outDir] [run] [part]  # letters, molten-to-velvet, ribbon entrance
+node scripts/v5.mjs [url] [outDir] [run] [part]  # letters, molten-to-velvet
+node scripts/v6.mjs [url] [outDir] [run] [part]  # hero on load/refresh, refresh mid-page, suction entrance
 ```
 
 `scripts/shots.mjs` uses `playwright-core`. It captures the hero at rest,
@@ -71,8 +72,9 @@ Transitions (each pair uses a different one, none may repeat):
 2. Manifesto → Editorial: `columns`, paper drops in as grid columns. The
    bridge overlaps the end of the Manifesto (negative margin), so the pillars
    start falling the moment the last word has lit.
-3. Editorial → Corridor: the ribbon entrance. The page comes apart into
-   ribbons that are drawn into the tunnel (`Corridor.tsx`, see below).
+3. Editorial → Corridor: the suction entrance. The page trembles, is pulled
+   back from its centre like a sheet into a drain, and the tunnel is seen
+   through the hole (`Corridor.tsx`, see below).
 4. Corridor → Dimension: `iris`, a red dot opens out of the black. It also
    overlaps the end of the Corridor so there is no black gap before the dot.
 5. Dimension → Brutal: `tiles`, hard-cut blocks, no easing
@@ -190,36 +192,51 @@ How it works:
 - In portrait (aspect under 0.8) the tunnel is narrower and taller with a
   wider field of view, one lane on the floor and ceiling, and fewer, larger
   panels spaced further apart so each can be read on a phone.
-- **The ribbon entrance (do not turn it back into a fade, a shrinking page or
-  speed lines).** The Corridor's stage takes over one screen early, on top of
-  Editorial's last screen (`margin-top: -100svh`), and the entrance is the
-  first 30% of the chapter's scroll (`ENTRANCE` in `Corridor.tsx`).
+- **The suction entrance (do not turn it back into ribbons, a fade, a
+  shrinking page or speed lines).** The Corridor's stage takes over one screen
+  early, on top of Editorial's last screen (`margin-top: -100svh`), and the
+  entrance is the first 32% of the chapter's scroll (`ENTRANCE` in
+  `Corridor.tsx`). `corridorState.vac` runs 0 to 1 across it.
   - **The page as a texture.** `lib/pageTexture.ts` redraws Editorial's last
     screen into a canvas from the DOM's own measurements: each word where the
     browser put it (a `Range` per word), in its computed font; the step
     rules; and the plates rasterised from their own SVG markup. It is
     repainted at the moment of takeover (`capture()`), and handed to the scene
     through `corridorState.page`.
-  - **The ribbons.** `CorridorScene` draws that texture on a sheet of vertical
-    strips (14, or 6 wider ones in portrait) that at rest is exactly the flat
-    page filling the screen. One vertex shader (`RIBBON_VERT`) does the rest
-    from the progress `uP`: a cut climbs from the bottom edge and the strips
-    below it hang loose and ripple; then each strip is drawn into the depth,
-    loose end first, gathering toward the centre line, waving and turning
-    about its own length; and it comes to rest laid along a wall, the floor or
-    the ceiling of the tunnel, running into the distance. It uses the
-    tunnel's own renderer; there is no second context.
-  - **The light.** A ribbon loses its light as it is laid along the tunnel
-    (`vShade`), and `ribbonLight` / `tunnelLight` in `lib/corridorState.ts`
-    take the last of the paper down while the tunnel's panels come up. The
-    stretched paper is therefore never seen bright. Keep it that way: bright,
-    stretched stripes read as radial speed lines.
-  - The cloth also moves on its own (`uTime`), the camera holds still during
-    the entrance, and everything is scrubbed and reversible.
-  - For the first instant (`p < 0.004`) the stage shows a DOM copy of the page
-    (`.vac-page`) so the handover from the real Editorial is exact. Without
-    WebGL that copy simply fades into the dark.
-  - Reduced motion: no entrance at all, a clean cut to a still frame.
+  - **The sheet.** `CorridorScene` draws that texture on a disc of fine rings
+    around the exact centre of the screen (104 x 144, or 56 x 72 on phones),
+    parented to the camera so it fills the screen whatever the lens does. The
+    disc is larger than the screen (`SHEET`): beyond the page's own edges it
+    is blank paper, so nothing behind it shows at the screen's edges while it
+    is drawn in. No depth test; it is drawn last, in the tunnel's own
+    renderer. One vertex shader (`SHEET_VERT`) does everything from `uP`:
+    - a *dent*: the centre is pushed back in depth, gaussian falloff;
+    - a *sink*: every point moves inward so that r squared falls by the same
+      amount `Q` everywhere, which is how a sheet flows into a drain (the
+      centre goes first and fastest, the page's edges are dragged in last);
+    - a *hole*: from `HOLE_OPENS` (0.4) a true hole of radius `a` opens at
+      the centre and grows until it has passed the corners of the screen;
+    - a *throat*: what has passed the rim runs down into the depth, goes
+      black, then thins away. It is black before it is thin, so no pale
+      paper ever lies over the tunnel.
+  - **The tunnel behind is never faded or dimmed.** It is complete, lit and
+    moving the whole time; it is simply not drawn until just before the hole
+    opens, because the sheet covers it. There is no crossfade anywhere.
+  - **The tremor.** A random offset of the whole sheet each frame (about 2px,
+    1px on phones) plus a hair of rotation, in the shader, not CSS. Its size
+    is `stir` (how hard the page is being scrolled, from
+    `scrollState.velocity`) times a curve that builds over the first third.
+    At rest `stir` is exactly zero and so is the offset: nothing moves while
+    nobody scrolls. The grain comes up and the edges darken with it.
+  - The stage is empty and see-through until this chapter's script has taken
+    over (`.cor-stage.is-set`), and the chapter's first screen has no
+    background, so before hydration (first load, or a refresh at the end of
+    Editorial) the real Editorial simply shows. After that the stage shows a
+    DOM copy of the page (`.vac-page`) until the sheet takes over at the
+    first movement (`p < 0.004`), so the handover is exact. Without WebGL
+    that copy fades into the dark.
+  - Scrubbed and fully reversible. Reduced motion: no entrance at all, a
+    clean cut to a still frame.
 - **It must be populated the instant it comes on screen, on a first visit.**
   How that is guaranteed:
   1. `lib/corridorAssets.ts` `preloadCorridor()` runs once the hero has
@@ -253,8 +270,24 @@ A raw WebGL fragment shader in `Manifesto.tsx`, written for this page.
   there is no black frame and no hard edge. The type fades in as the cloth
   lands and the first word lights straight away. The chapter takes no
   pointer events (it overlaps the hero's letters), so the brush listens on
-  the window. Reduced motion: the velvet fades softly in over the foot of the
-  hero with a CSS mask.
+  the window.
+- **Hidden is the default, in CSS (the hero overlap bug).** Because the
+  chapter overlaps the hero, its top sits at 70svh of the first screen. In
+  v5 the backdrop and the type were only hidden by this component's script,
+  and that script does not run until the chapter hydrates, which waits for
+  the visitor's first input (up to nine seconds). So on every load and
+  refresh "DESIGN IS A DECISION MADE VISIBLE." sat over the foot of the hero.
+  Now `.mf-back` and `.mf-lines` take their opacity from a custom property,
+  `--settle` (0 to 1), whose default is 0, and unlit words are dim by
+  default. Nothing of this chapter can paint before the velvet starts to
+  settle, script or no script. Keep any new element in this chapter hidden
+  the same way.
+  - An inline script in `layout.tsx` (`settleGate`) keeps `--settle` right
+    for the scroll position before hydration, so a refresh in the middle of
+    the Manifesto shows it at once; `Manifesto.tsx` removes that listener
+    and takes the property over.
+  - Reduced motion: the chapter starts directly below the hero (no overlap)
+    and the velvet fades in out of black with a CSS mask.
 - **The cloth.** A heightfield of long, leaning folds (domain-warped noise,
   stretched along one axis) drifts very slowly. It is lit the way pile fabric
   is lit: nearly black where it faces you, glowing oxblood on its slopes
@@ -328,6 +361,29 @@ static show: no bridges, sticky stages become ordinary sections, canvases and
 
 Sticky stages use CSS `position: sticky`, not ScrollTrigger pinning, so there
 is no pin spacing to get wrong and scroll is never hijacked.
+
+## Refreshing part way down
+
+A refresh restores the scroll offset before most chapters have hydrated. What
+keeps that right:
+
+- **Overlapping chapters are empty until their script runs.** The Manifesto
+  (over the hero) and the Corridor's stage (over Editorial's last screen) are
+  hidden by default in CSS; see their sections.
+- **No `once: true` scroll triggers.** They remove themselves from
+  ScrollTrigger's list when they have played. After a refresh below
+  Editorial several did so in the middle of a later chapter's refresh;
+  ScrollTrigger threw, and that chapter (the Corridor) stayed black. Use the
+  default `toggleActions` (plays once, never reverses) and leave the trigger
+  alive.
+- **Height guesses.** Chapters use `content-visibility: auto`, so an
+  unrendered chapter has a guessed height (`contain-intrinsic-size`).
+  Editorial, Brutal and the footer get guesses close to their real heights;
+  with the old 200svh guess a refresh in the Corridor came back two screens
+  further on. If those chapters change length, update the guesses.
+
+Check all of it with `node scripts/v6.mjs` (the `refresh` part prints where
+each refresh came back).
 
 ## Performance notes (keep these intact)
 

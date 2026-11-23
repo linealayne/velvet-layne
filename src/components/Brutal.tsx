@@ -37,12 +37,15 @@ export default function Brutal() {
         toggleClass: "is-live",
       });
       // Each glitch target fires once as it scrolls in, so touch screens see it too.
+      const fired = new WeakSet<HTMLElement>();
       ScrollTrigger.batch(el.querySelectorAll(".glitch"), {
         start: "top 78%",
-        once: true,
+        // Not `once: true` (see Editorial.tsx): each target is remembered instead.
         onEnter: (targets) =>
           targets.forEach((t, i) => {
             const node = t as HTMLElement;
+            if (fired.has(node)) return;
+            fired.add(node);
             window.setTimeout(() => {
               node.classList.add("is-glitching");
               window.setTimeout(() => node.classList.remove("is-glitching"), 650);

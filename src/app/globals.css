@@ -332,14 +332,13 @@ html.anim .manifesto {
   background: transparent;
   pointer-events: none;
 }
-/* Without motion: the velvet fades softly in over the foot of the hero. */
-html:not(.anim) .manifesto {
-  margin-top: -18svh;
-  background: transparent;
-}
+/* Without motion: the velvet fades softly in out of black, directly below
+   the hero (the fade is as deep as the stage's top padding, so it never
+   touches the type). It does not overlap the hero: on load the first screen
+   is the name, the field and the cue, nothing else. */
 html:not(.anim) .mf-stage {
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22svh);
-  mask-image: linear-gradient(to bottom, transparent, #000 22svh);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12svh);
+  mask-image: linear-gradient(to bottom, transparent, #000 12svh);
 }
 .mf-stage {
   position: relative;
@@ -362,6 +361,19 @@ html.anim .mf-stage {
     radial-gradient(90% 70% at 30% 35%, #2a060d 0%, transparent 70%),
     radial-gradient(70% 60% at 78% 70%, #1c0409 0%, transparent 70%),
     var(--black);
+}
+/* The chapter overlaps the hero, so its hidden state is the default, in CSS,
+   and does not wait for any script. --settle (0 to 1) is how far the velvet
+   has rolled in: an inline script in layout.tsx sets it from the scroll
+   position before the chapter hydrates, then Manifesto.tsx takes it over. */
+html.anim .mf-back {
+  opacity: calc(var(--settle, 0) * var(--settle, 0));
+}
+html.anim .mf-lines {
+  opacity: clamp(0, calc((var(--settle, 0) - 0.7) / 0.3), 1);
+}
+html.anim .mf-word {
+  opacity: 0.1;
 }
 .mf-canvas {
   position: absolute;
@@ -629,6 +641,16 @@ html.anim .bridge-iris {
 html.anim .corridor {
   height: 560svh;
   margin-top: -100svh;
+  /* Nothing of this chapter may sit on Editorial's last screen until its
+     script has taken over: the first screen has no background, and the stage
+     is empty and see-through until it is marked .is-set (Corridor.tsx). */
+  background: linear-gradient(to bottom, transparent 100lvh, #000 100lvh);
+}
+html.anim .cor-stage:not(.is-set) {
+  background: transparent;
+}
+html.anim .cor-stage:not(.is-set) > * {
+  visibility: hidden;
 }
 .cor-stage {
   position: relative;
@@ -673,7 +695,7 @@ html.anim .cor-stage {
 }
 /* The entrance. For the first instant the stage shows a DOM copy of
    Editorial's last screen, so the handover from the real page is exact; the
-   WebGL ribbons, textured with the same page, take over as soon as it moves. */
+   WebGL sheet, textured with the same page, takes over as soon as it moves. */
 .vac-page {
   display: none;
 }
@@ -1317,6 +1339,20 @@ main > .bridge {
   content-visibility: auto;
   contain-intrinsic-size: auto 200svh;
 }
+/* Closer guesses for the chapters whose height comes from their content. A
+   refresh part way down restores a scroll offset; if a chapter above it is
+   still unrendered and guessed far too short, the page comes back somewhere
+   else (Editorial was guessed at half its height, so a refresh in the
+   Corridor landed two screens further on). */
+.editorial {
+  contain-intrinsic-size: auto 440svh;
+}
+.brutal {
+  contain-intrinsic-size: auto 260svh;
+}
+.footer {
+  contain-intrinsic-size: auto 88svh;
+}
 
 /* ───────── Phones and small tablets (under 1024 this is its own design) ───────── */
 
@@ -1407,6 +1443,15 @@ main > .bridge {
   }
   html.anim .manifesto {
     height: 540svh;
+  }
+  .editorial {
+    contain-intrinsic-size: auto 423svh;
+  }
+  .brutal {
+    contain-intrinsic-size: auto 204svh;
+  }
+  .footer {
+    contain-intrinsic-size: auto 78svh;
   }
   html.anim .bridge-columns {
     margin-top: -170svh;
