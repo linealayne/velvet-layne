@@ -323,7 +323,23 @@ html.anim .cue span {
    which sits on top of it (see .bridge-columns): the pillars start to fall
    the moment the last word has lit. */
 html.anim .manifesto {
-  height: 410svh;
+  height: 560svh;
+  /* It rises over the hero and its stage takes over while the hero is still
+     pinned, so the velvet can settle onto the colour field full-screen.
+     Until then it is completely transparent, and it never takes the pointer
+     (the hero's letters are underneath). */
+  margin-top: -230svh;
+  background: transparent;
+  pointer-events: none;
+}
+/* Without motion: the velvet fades softly in over the foot of the hero. */
+html:not(.anim) .manifesto {
+  margin-top: -18svh;
+  background: transparent;
+}
+html:not(.anim) .mf-stage {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22svh);
+  mask-image: linear-gradient(to bottom, transparent, #000 22svh);
 }
 .mf-stage {
   position: relative;
@@ -338,8 +354,10 @@ html.anim .mf-stage {
   top: 0;
   height: 100svh;
 }
-.mf-stage {
-  /* What shows before the velvet shader is ready, or without WebGL. */
+/* What shows before the velvet shader is ready, or without WebGL. */
+.mf-back {
+  position: absolute;
+  inset: 0;
   background:
     radial-gradient(90% 70% at 30% 35%, #2a060d 0%, transparent 70%),
     radial-gradient(70% 60% at 78% 70%, #1c0409 0%, transparent 70%),
@@ -1409,7 +1427,7 @@ main > .bridge {
     height: 170svh;
   }
   html.anim .manifesto {
-    height: 390svh;
+    height: 540svh;
   }
   html.anim .bridge-columns {
     margin-top: -170svh;

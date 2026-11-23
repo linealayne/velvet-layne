@@ -10,6 +10,9 @@ const LINES = [
   "One idea, built all the way through.",
 ];
 
+/** How many screens of scroll the velvet takes to settle over the hero. */
+const SETTLE = 1.15;
+
 const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
 
 /**
@@ -22,6 +25,7 @@ precision highp float;
 uniform vec2 uRes;
 uniform float uTime;
 uniform float uShift;
+uniform float uSettle;
 uniform sampler2D uBrush;
 
 float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
@@ -73,11 +77,21 @@ void main(){
   col=mix(col,col*.2,down);
 
   col*=.55+.45*smoothstep(1.25,.25,length(p));
-  gl_FragColor=vec4(col,1.);
+
+  // Settling in over the hero: the cloth rolls across the frame on the
+  // diagonal, its leading edge shaped by the folds and still warm.
+  float d=(uv.x*.6+(1.-uv.y)*.8)/1.4-(h-.5)*.5;
+  float edge=uSettle*1.7-.35;
+  float a=1.-smoothstep(edge-.3,edge,d);
+  float front=smoothstep(edge-.34,edge-.12,d)*a*(1.-uSettle);
+  col+=vec3(.6,.1,.03)*front;
+  gl_FragColor=vec4(col*a,a);
 }`;
 
 /**
- * Chapter 2. A full screen of very dark oxblood velvet. Its folds breathe and
+ * Chapter 2. A full screen of very dark oxblood velvet. It arrives by settling
+ * over the hero's cooling colour field: molten becomes velvet, one material
+ * turning into another, with no cut between the chapters. Its folds breathe and
  * drift on their own. Moving the cursor across it brushes the nap: the pile
  * turns lighter or darker along the stroke, then recovers over a couple of
  * seconds. A finger drag does the same on touch screens, and scrolling shifts
@@ -88,7 +102,6 @@ export default function Manifesto() {
 
   useStage(() => {
     const el = root.current!;
-    const stage = el.querySelector<HTMLElement>(".mf-stage")!;
     const canvas = el.querySelector<HTMLCanvasElement>(".mf-canvas")!;
     const moving = motionOn();
     const small = isSmall();
@@ -104,7 +117,8 @@ export default function Manifesto() {
           defaults: { ease: "none" },
           scrollTrigger: {
             trigger: el,
-            start: "top 35%",
+            // The first word lights as the velvet finishes settling.
+            start: () => `top+=${Math.round(window.innerHeight * SETTLE)} top`,
             end: () => `bottom ${small ? 170 : 190}%`,
             scrub: 0.5,
           },
@@ -116,8 +130,30 @@ export default function Manifesto() {
         );
     }
 
+    /* ── Settling in. This chapter's stage sits on top of the hero for the
+          hero's last stretch; over that stretch the velvet rolls in (`uSettle`)
+          and the type appears. ── */
+    let settle = moving ? 0 : 1;
+    if (moving) {
+      const back = el.querySelector<HTMLElement>(".mf-back")!;
+      const lines = el.querySelector<HTMLElement>(".mf-lines")!;
+      const applySettle = (v: number) => {
+        settle = v;
+        back.style.opacity = (v * v).toFixed(3);
+        lines.style.opacity = gsap.utils.clamp(0, 1, (v - 0.7) / 0.3).toFixed(3);
+      };
+      applySettle(0);
+      ScrollTrigger.create({
+        trigger: el,
+        start: "top top",
+        end: () => `+=${Math.round(window.innerHeight * SETTLE)}`,
+        onUpdate: (self) => applySettle(self.progress),
+        onRefresh: (self) => applySettle(self.progress),
+      });
+    }
+
     /* ── The velvet ── */
-    const gl = canvas.getContext("webgl", { antialias: false, alpha: false, powerPreference: "high-performance" });
+    const gl = canvas.getContext("webgl", { antialias: false, alpha: true, powerPreference: "high-performance" });
     if (!gl) {
       canvas.style.display = "none";
       return;
@@ -166,7 +202,7 @@ export default function Manifesto() {
       const r = canvas.getBoundingClientRect();
       const x = (clientX - r.left) / r.width;
       const y = (clientY - r.top) / r.height;
-      if (x < 0 || x > 1 || y < 0 || y > 1) {
+      if (settle < 0.95 || x < 0 || x > 1 || y < 0 || y > 1) {
         lastX = -1;
         return;
       }
@@ -214,6 +250,7 @@ export default function Manifesto() {
         res: gl.getUniformLocation(prog, "uRes"),
         time: gl.getUniformLocation(prog, "uTime"),
         shift: gl.getUniformLocation(prog, "uShift"),
+        settle: gl.getUniformLocation(prog, "uSettle"),
         brush: gl.getUniformLocation(prog, "uBrush"),
       };
       const tex = gl.createTexture();
@@ -233,7 +270,7 @@ export default function Manifesto() {
       gl.uniform1i(u.brush, 0);
 
       let progress = 0;
-      let shift = 0;
+      let shift = 0.9;
       const draw = (seconds: number, dt: number) => {
         if (dirty) {
           // The pile springs back: a stroke is mostly gone after two seconds.
@@ -247,7 +284,11 @@ export default function Manifesto() {
           dirty = any;
           upload();
         }
-        shift += (progress - shift) * 0.06;
+        // While it settles the cloth is still moving; then it comes to rest.
+        shift += (progress + (1 - settle) * 0.9 - shift) * 0.06;
+        gl.uniform1f(u.settle, moving ? settle : 1);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
         gl.uniform2f(u.res, canvas.width, canvas.height);
         gl.uniform1f(u.time, seconds);
         gl.uniform1f(u.shift, shift);
@@ -300,9 +341,11 @@ export default function Manifesto() {
           id = requestAnimationFrame(loop);
         }
       };
+      // The chapter overlaps the hero, so "on screen" starts when its stage
+      // takes over (its top reaches the top), not when its box first shows.
       const st = ScrollTrigger.create({
         trigger: el,
-        start: "top bottom",
+        start: "top top",
         end: "bottom top",
         onUpdate: (self) => (progress = self.progress),
         onToggle: (self) => run(self.isActive && !document.hidden),
@@ -322,9 +365,11 @@ export default function Manifesto() {
         lastX = -1;
       };
       window.addEventListener("pointermove", onMove, { passive: true });
-      stage.addEventListener("touchstart", lift, { passive: true });
-      stage.addEventListener("touchmove", onTouch, { passive: true });
-      stage.addEventListener("touchend", lift, { passive: true });
+      // On the window: the chapter itself takes no pointer events, because it
+      // overlaps the hero and must not block the letters.
+      window.addEventListener("touchstart", lift, { passive: true });
+      window.addEventListener("touchmove", onTouch, { passive: true });
+      window.addEventListener("touchend", lift, { passive: true });
 
       return () => {
         run(false);
@@ -332,9 +377,9 @@ export default function Manifesto() {
         ro.disconnect();
         document.removeEventListener("visibilitychange", onVis);
         window.removeEventListener("pointermove", onMove);
-        stage.removeEventListener("touchstart", lift);
-        stage.removeEventListener("touchmove", onTouch);
-        stage.removeEventListener("touchend", lift);
+        window.removeEventListener("touchstart", lift);
+        window.removeEventListener("touchmove", onTouch);
+        window.removeEventListener("touchend", lift);
       };
     };
     wait();
@@ -350,6 +395,7 @@ export default function Manifesto() {
   return (
     <section ref={root} className="manifesto">
       <div className="mf-stage">
+        <div className="mf-back" aria-hidden="true" />
         <canvas className="mf-canvas" aria-hidden="true" />
         <h2 className="mf-lines">
           {LINES.map((line) => (

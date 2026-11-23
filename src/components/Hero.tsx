@@ -38,7 +38,8 @@ function Line({ glyphs, start, delay }: { glyphs: Glyph[]; start: number; delay:
  * Chapter 1. Two things on screen: the name and the scroll cue.
  * Each of the eleven letters is a window: hover it and a looping scene cuts in,
  * clipped to the letterform. Scrolling parts the name like a curtain, lets the
- * colour field bloom through its hues, then cools it to black for the Manifesto.
+ * colour field bloom through its hues, then cools it as the Manifesto's velvet
+ * settles over it.
  *
  * The scenes are drawn by `lib/letterEngine.ts` onto one small canvas per
  * letter, clipped to the letter's outline with Path2D. Where the engine runs:
@@ -54,7 +55,7 @@ function Line({ glyphs, start, delay }: { glyphs: Glyph[]; start: number; delay:
  */
 export default function Hero() {
   const root = useRef<HTMLDivElement>(null);
-  const field = useRef<FieldState>({ bloom: 0, hue: 0, mx: 0.5, my: 0.5 });
+  const field = useRef<FieldState>({ bloom: 0, hue: 0, mx: 0.5, my: 0.5, cool: 0 });
 
   useStage(
     () => {
@@ -291,7 +292,7 @@ export default function Hero() {
               scrub: 0.4,
               onUpdate: (self) => {
                 const p = self.progress;
-                state.hue = -0.95 * Math.sin(gsap.utils.clamp(0, 1, (p - 0.1) / 0.8) * Math.PI * 2);
+                state.hue = -0.95 * Math.sin(gsap.utils.clamp(0, 1, (p - 0.08) / 0.5) * Math.PI * 2);
                 const lock = p > 0.025;
                 if (lock !== locked) {
                   locked = lock;
@@ -306,7 +307,11 @@ export default function Hero() {
           .to(".name-scale", { scale: 1.6, duration: 0.42, ease: "power2.in" }, 0.02)
           .to(".name-scale", { opacity: 0, duration: 0.2 }, 0.25)
           .to(state, { bloom: 1, duration: 0.4, ease: "power1.inOut" }, 0)
-          .to(".field-shade", { opacity: 1, duration: 0.24, ease: "power1.in" }, 0.76);
+          // The molten field slows and darkens as it cools. The velvet settles
+          // over it from Manifesto.tsx, which overlaps this stage: one
+          // continuous change of material, no black frame and no hard edge.
+          .to(state, { cool: 1, duration: 0.4, ease: "power1.inOut" }, 0.34)
+          .to(".field-shade", { opacity: 0.6, duration: 0.45, ease: "power1.inOut" }, 0.36);
 
         const onMove = (e: PointerEvent) => {
           state.mx = e.clientX / window.innerWidth;

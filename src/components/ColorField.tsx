@@ -3,7 +3,14 @@
 import { useEffect, useRef } from "react";
 import { motionOn, isSmall } from "@/lib/gsap";
 
-export type FieldState = { bloom: number; hue: number; mx: number; my: number };
+export type FieldState = {
+  bloom: number;
+  hue: number;
+  mx: number;
+  my: number;
+  /** 0 to 1: how far the field has cooled. It only slows the motion down. */
+  cool?: number;
+};
 
 const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
 
@@ -172,13 +179,17 @@ export default function ColorField({
 
       let visible = true;
       let id = 0;
-      const t0 = performance.now();
+      let clock = 14;
+      let before = performance.now();
       // The field moves slowly, so phones draw it on every other frame:
       // half the GPU work and battery for a difference nobody can see.
       let skip = false;
       const loop = (now: number) => {
         skip = small && !skip;
-        if (!skip) draw((now - t0) / 1000 + 14);
+        // Cooling slows the liquid down; the shader itself is untouched.
+        clock += (Math.min(now - before, 100) / 1000) * (1 - 0.88 * (state.current.cool ?? 0));
+        before = now;
+        if (!skip) draw(clock);
         id = requestAnimationFrame(loop);
       };
       const sync = () => {
