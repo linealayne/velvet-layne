@@ -382,6 +382,15 @@ keeps that right:
   with the old 200svh guess a refresh in the Corridor came back two screens
   further on. If those chapters change length, update the guesses.
 
+**Known and open:** in Playwright WebKit (iPhone 15 emulation), roughly one
+refresh in five below Editorial comes back one chapter further down. The
+chapter it lands on is drawn correctly. For a moment after the reload the
+Editorial section is missing from the page (it looks like React re-rendering
+that Suspense boundary on the client), so the restored offset is applied to
+a page that is one chapter short. Not reproduced in Chrome; not checked on a
+real iPhone. Turning off `content-visibility` for Editorial did not cure it
+and changed Editorial's height, so it was not kept.
+
 Check all of it with `node scripts/v6.mjs` (the `refresh` part prints where
 each refresh came back).
 

@@ -109,9 +109,11 @@ for (const run of RUNS) {
         await go(sel, f, mode, 900);
         const y = await page.evaluate(() => window.scrollY);
         await page.reload({ waitUntil: "domcontentloaded" });
-        // Restore by hand if the engine did not (WebKit under automation).
-        await page.evaluate((v) => Math.abs(window.scrollY - v) > 4 && window.scrollTo(0, v), y);
+        // The browser restores the offset itself; only if it has not by then
+        // is it put back by hand.
         await page.waitForTimeout(250);
+        await page.evaluate((v) => Math.abs(window.scrollY - v) > 4 && window.scrollTo(0, v), y);
+        await page.waitForTimeout(60);
         await shoot(`refresh-${name}-early`);
         await page.waitForTimeout(3200);
         await shoot(`refresh-${name}`);
