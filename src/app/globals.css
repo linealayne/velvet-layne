@@ -77,12 +77,11 @@ html.lenis body {
   inset: -80px;
   z-index: 80;
   pointer-events: none;
-  opacity: 0.5;
-  /* Two layers of sparse specks, light and dark. Alpha comes from the noise
-     itself, so flat areas keep their true colour: blacks stay black. */
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 .95 0 0 0 0 .86 1.5 0 0 0 -.78'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.5 0 0 0 -.78'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.2;
+  /* A ready-made tile of sparse light and dark specks (scripts/grain.mjs).
+     Most of it is transparent, so flat areas keep their true colour and
+     blacks stay black. No blend mode, no filter: nothing to compute. */
+  background: url("/grain.png") 0 0 / 128px 128px;
 }
 /* Transform only, in hard steps: the grain flickers without costing layout. */
 html.anim .film-grain {
@@ -205,6 +204,7 @@ html.anim .intro-black {
   position: relative;
   flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
 }
 .lt-in {
   position: absolute;
@@ -227,7 +227,8 @@ html.anim .intro-black {
   height: 100%;
   pointer-events: none;
 }
-/* The name slices together: alternate letters wipe in from above and below. */
+/* The name slices together: alternate letters slide in from above and below,
+   each behind its own mask. Transform only, so it never repaints. */
 html.anim .lt-in {
   animation: slice-a 1.15s cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: calc(var(--d, 0) * 1s);
@@ -237,18 +238,12 @@ html.anim .lt:nth-child(even) .lt-in {
 }
 @keyframes slice-a {
   from {
-    clip-path: inset(0 0 100% 0);
-  }
-  to {
-    clip-path: inset(0 0 0 0);
+    transform: translateY(-101%);
   }
 }
 @keyframes slice-b {
   from {
-    clip-path: inset(100% 0 0 0);
-  }
-  to {
-    clip-path: inset(0 0 0 0);
+    transform: translateY(101%);
   }
 }
 /* The kick a letter gets as its scene cuts in. */
@@ -289,32 +284,33 @@ html.anim .cue span {
   animation: drum 3.1s infinite;
   animation-delay: calc(2.4s + var(--i) * 70ms);
 }
-/* One full turn in 2.3s, then 0.8s facing front. The far side is darker. */
+/* One full turn in 2.3s, then 0.8s facing front. The far side of the drum is
+   dimmer. Transform and opacity only, so the cue runs on the compositor. */
 @keyframes drum {
   0% {
     transform: rotateX(0deg);
-    color: var(--bone);
+    opacity: 1;
     animation-timing-function: cubic-bezier(0.45, 0, 1, 1);
   }
   18.5% {
     transform: rotateX(90deg);
-    color: #7a4a42;
+    opacity: 0.5;
     animation-timing-function: linear;
   }
   37% {
     transform: rotateX(180deg);
-    color: #33161a;
+    opacity: 0.2;
     animation-timing-function: linear;
   }
   55.5% {
     transform: rotateX(270deg);
-    color: #7a4a42;
+    opacity: 0.5;
     animation-timing-function: cubic-bezier(0, 0, 0.4, 1);
   }
   74%,
   100% {
     transform: rotateX(360deg);
-    color: var(--bone);
+    opacity: 1;
   }
 }
 
@@ -1288,7 +1284,7 @@ main > .bridge {
     animation: none;
   }
   .film-grain {
-    opacity: 0.4;
+    opacity: 0.17;
   }
 
   /* The name stays two stacked lines, full-bleed, stretched tall. */

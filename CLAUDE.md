@@ -35,6 +35,7 @@ bash scripts/serve.sh                            # rebuild + serve on :3210
 node scripts/shots.mjs [url] [outDir] [filter] [jpeg]   # Playwright screenshots
 node scripts/captures.mjs                        # re-capture the demo sites
 node scripts/og.mjs [url]                        # regenerate the share card
+node scripts/grain.mjs                           # regenerate the film grain tile
 ```
 
 `scripts/shots.mjs` uses `playwright-core` with the installed Chrome. It
@@ -47,7 +48,7 @@ and prints horizontal overflow and console errors. Pass a filter of `1024`,
 
 | # | Chapter | Files | What it is |
 |---|---------|-------|------------|
-| 1 | Hero | `Hero.tsx`, `ColorField.tsx`, `lib/glyphs.ts`, `lib/scenes.ts` | VELVET / LAYNE filling the screen over the molten colour field, plus the scroll cue. Each letter is a window onto a scene. |
+| 1 | Hero | `Hero.tsx`, `ColorField.tsx`, `lib/glyphs.ts`, `lib/scenes.ts`, `lib/letterEngine.ts`, `lib/letters.worker.ts` | VELVET / LAYNE filling the screen over the molten colour field, plus the scroll cue. Each letter is a window onto a scene. |
 | 2 | Manifesto | `Manifesto.tsx` | Near-black field, oxblood threads drifting like silk, dust at three depths. Four lines light up word by word. |
 | 3 | Editorial | `Editorial.tsx`, `lib/art.ts` | The light moment: warm tan paper, Swiss grid, oversized Bodoni numerals, SVG plates with mask reveals. |
 | 4 | The Corridor | `Corridor.tsx`, `CorridorScene.tsx`, `lib/posters.ts`, `public/work/` | The centrepiece. A three.js gallery tunnel: panels stream along floor, ceiling and walls into the vanishing point and never stop. |
@@ -97,17 +98,27 @@ How it works:
 - To regenerate the outlines: open the Anybody woff2 from `.next/static/media`
   with `fontkit`, call `getVariation({ wght: 900, wdth })`, and write each
   glyph's path commands with y flipped and the bounding box moved to 0,0.
-- On hover a letter lazily gets one 2D canvas. Each frame the engine in
-  `Hero.tsx` clips to the letter's `Path2D`, fills bone, clips again to the
-  diagonal slice, and calls `scene.draw(ctx, w, h, t)`. Idle letters have no
-  canvas work at all, and the loop stops when no letter is active.
+- The scenes are drawn by `lib/letterEngine.ts`, which normally runs inside
+  a Web Worker (`lib/letters.worker.ts`). The first time a letter is used,
+  `Hero.tsx` creates one canvas for it and transfers it to the worker as an
+  OffscreenCanvas; after that it only posts `size`, `on`, `off` and `clear`.
+  Scene drawing therefore costs the main thread nothing. Browsers that cannot
+  transfer a canvas run the same engine on the main thread.
+- Each frame the engine clips to the letter's `Path2D`, fills bone, clips
+  again to the diagonal slice, and calls `scene.draw(ctx, w, h, t)`. Idle
+  letters do no work and the loop stops when no letter is active. When a scene
+  has wiped out, the worker posts `idle` and the page shows the SVG again.
+- Scenes pre-render their static parts once (`cached()`) and blit them, so a
+  frame is a handful of draw calls. Keep it that way.
 - Wipe in 250ms, hold 500ms after leave, wipe out 250ms. Several letters can
   be active at once.
 - The two chrome scenes render through ONE shared offscreen WebGL canvas
   (`warmChrome()` in `scenes.ts`) and are copied in with `drawImage`. Never
-  create a WebGL context per letter.
+  create a WebGL context per letter. On touch devices they use a 2D version
+  instead (`setLite`), so phones never open a second WebGL context.
 - Touch screens: letters fire on their own, one at a time, about every 2.3s in
-  a shuffled order with no immediate repeat. Tapping a letter fires it.
+  a shuffled order with no immediate repeat. Tapping a letter fires it. Steady
+  scenes repaint at half rate there.
 - Reduced motion: hover shows one still frame (`scene.still`), no wipe.
 - Letters lock (no hover, no auto-fire) once the page has scrolled a little.
 
@@ -151,6 +162,11 @@ is no pin spacing to get wrong and scroll is never hijacked.
 
 - The hero paints from server HTML: SVG letters and CSS keyframes, no JS
   needed for the arrival animation or the scroll cue.
+- Hero CSS animations use `transform` and `opacity` only, so they run on the
+  compositor. Do not animate `clip-path`, `color` or anything else that
+  repaints: on phones that work never stops and the page never goes idle.
+- The scroll cue is visible from the first paint (it is the first text on the
+  page). Do not fade it in from `opacity: 0`.
 - Chapter setup uses `useStage()` from `src/lib/gsap.ts` instead of `useGSAP`.
   By default a chapter sets itself up only when it comes within about a screen
   of the viewport (`"near"`); the hero uses `"soon"`. Do not measure or animate
@@ -169,9 +185,11 @@ is no pin spacing to get wrong and scroll is never hijacked.
   Editorial, where nothing is moving.
 - Every loop (field, letters, threads, corridor, knot, orbit, tracers) stops
   when its chapter is off screen or the tab is hidden.
-- The film grain is one fixed layer of sparse specks with no blend mode, moved
-  with transform in hard steps. Do not give it a blend mode: that costs a
-  full-screen pass every frame.
+- The film grain is one fixed layer tiling `public/grain.png` (made by
+  `scripts/grain.mjs`): sparse light and dark specks on transparency, moved
+  with transform in hard steps. No blend mode and no SVG filter: a blend mode
+  costs a full-screen pass every frame, and a noise filter has to be computed
+  by the browser at every load.
 - Lighthouse on a busy laptop swings a lot. Check `benchmarkIndex` in the
   report, stop local servers, and take the median of several runs.
 
