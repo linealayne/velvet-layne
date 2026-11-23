@@ -1,13 +1,13 @@
 import { Suspense } from "react";
 import SmoothScroll from "@/components/SmoothScroll";
-import Cursor from "@/components/Cursor";
-import Hud from "@/components/Hud";
-import Act1 from "@/components/Act1";
+import Hero from "@/components/Hero";
+import Manifesto from "@/components/Manifesto";
 import Bridge from "@/components/Bridge";
-import Conveyor from "@/components/Conveyor";
 import Editorial from "@/components/Editorial";
+import Corridor from "@/components/Corridor";
 import Dimension from "@/components/Dimension";
 import Brutal from "@/components/Brutal";
+import Finale from "@/components/Finale";
 import Footer from "@/components/Footer";
 
 // Nothing below suspends. Each boundary exists so React hydrates that chapter
@@ -17,34 +17,38 @@ export default function Home() {
   return (
     <>
       <SmoothScroll />
-      <Cursor />
-      <Hud />
       <main>
         <Suspense>
-          <Act1 />
+          <Hero />
         </Suspense>
         <Suspense>
-          <Conveyor />
+          <Manifesto />
+          <Bridge variant="columns" />
         </Suspense>
         <Suspense>
-          <Bridge variant="columns" index={4} title="Editorial" />
           <Editorial />
         </Suspense>
         <Suspense>
-          <Bridge variant="iris" index={5} title="Dimension" />
+          <Corridor />
+          <Bridge variant="iris" />
+        </Suspense>
+        <Suspense>
           <Dimension />
+          <Bridge variant="tiles" />
         </Suspense>
         <Suspense>
-          <Bridge variant="tiles" index={6} title="Brutal" />
           <Brutal />
+          <Bridge variant="hinge" />
         </Suspense>
         <Suspense>
-          <Bridge variant="hinge" index={7} title="Tracers" />
+          <Finale />
         </Suspense>
       </main>
       <Suspense>
         <Footer />
       </Suspense>
+      {/* One sheet of film grain over the whole show. */}
+      <div className="film-grain" aria-hidden="true" />
     </>
   );
 }

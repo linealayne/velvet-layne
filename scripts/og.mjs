@@ -9,7 +9,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1200, height: 630 } });
 await page.goto(url, { waitUntil: "networkidle" });
-await page.addStyleTag({ content: ".hud-chapter,.hud-bar,.cue{display:none!important}" });
+await page.addStyleTag({ content: ".cue-wrap,.film-grain{display:none!important}" });
 await page.waitForTimeout(5000);
 await page.screenshot({ path: "src/app/opengraph-image.png" });
 await browser.close();

@@ -57,8 +57,6 @@ export default function Brutal() {
     <section
       ref={root}
       className={pressed ? "brutal is-inverted" : "brutal"}
-      data-chapter="6"
-      data-name="Brutal"
     >
       <p className="br-side" aria-hidden="true">
         Loud on purpose / Loud on purpose / Loud on purpose

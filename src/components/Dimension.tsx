@@ -19,7 +19,7 @@ export default function Dimension() {
           io.disconnect();
         }
       },
-      { rootMargin: "320% 0px" }
+      { rootMargin: "900% 0px" }
     );
     io.observe(root.current!);
     return () => io.disconnect();
@@ -46,24 +46,16 @@ export default function Dimension() {
   );
 
   return (
-    <section ref={root} className="dimension" data-chapter="5" data-name="Dimension">
+    <section ref={root} className="dimension">
       <div className="dim-stage">
         <div className="dim-glow" aria-hidden="true" />
         {near && <Sculpture />}
         <div className="dim-fallback" aria-hidden="true" />
         <div className="dim-text dim-a">
           <h2>Depth is light, behaving.</h2>
-          <p>
-            Real geometry, rendered live in your browser. Move the cursor and
-            it turns to look. Keep scrolling and it opens up.
-          </p>
         </div>
         <div className="dim-text dim-b">
           <p className="dim-big">Same object. New angle.</p>
-          <p>
-            No video and no image sequence. One knot, three rings and a
-            studio of colored light, all built in code.
-          </p>
         </div>
       </div>
     </section>

@@ -21,24 +21,7 @@ import {
   TorusKnotGeometry,
   WebGLRenderer,
 } from "three";
-import { ScrollTrigger, scrollState, motionOn, isSmall } from "@/lib/gsap";
-
-/**
- * Compiling shaders can stall the GPU for a moment on some machines, and that
- * stall would freeze whatever is moving on screen. So the heavy steps wait for
- * a beat when the page is at rest (or 1.5s, whichever comes first).
- */
-const calm = () =>
-  new Promise<void>((resolve) => {
-    const t0 = performance.now();
-    let still = 0;
-    const check = () => {
-      still = Math.abs(scrollState.velocity) < 40 ? still + 1 : 0;
-      if (still >= 4 || performance.now() - t0 > 1500) resolve();
-      else requestAnimationFrame(check);
-    };
-    requestAnimationFrame(check);
-  });
+import { ScrollTrigger, calm, motionOn, isSmall } from "@/lib/gsap";
 
 /** Yield to the browser so scene start-up never lands in one long task. */
 const breathe = () =>
@@ -130,10 +113,10 @@ export default function Sculpture() {
         studio.add(m);
       };
       panel("#ff2447", 7, [-7, 3, 3], 7, 7);
-      panel("#2f55ff", 8, [7, -1, 4], 5, 9);
+      panel("#8fa3bd", 7, [7, -1, 4], 5, 9);
       panel("#ffffff", 12, [0, 8, 1], 9, 3);
-      panel("#ff9a3c", 5, [3, -7, -3], 8, 4);
-      panel("#a45bff", 6, [-4, -2, -8], 7, 7);
+      panel("#ff4d00", 6, [3, -7, -3], 8, 4);
+      panel("#c4001d", 6, [-4, -2, -8], 7, 7);
       panel("#ffffff", 9, [5, 4, -7], 2, 8);
       const pmrem = new PMREMGenerator(renderer);
       const env = keep(pmrem.fromScene(studio, 0.03));
@@ -163,7 +146,7 @@ export default function Sculpture() {
       );
       group.add(knot);
 
-      const rings = [0xff6a80, 0x8fa4ff, 0xffffff].map((color, i) => {
+      const rings = [0xff4d00, 0xc9ced6, 0xefe4d0].map((color, i) => {
         const ring = new Mesh(
           keep(new TorusGeometry(1.8 + i * 0.26, 0.012 + i * 0.004, 8, small ? 90 : 180)),
           keep(new MeshStandardMaterial({ color, metalness: 1, roughness: 0.18 }))

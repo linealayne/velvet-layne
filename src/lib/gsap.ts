@@ -74,3 +74,21 @@ export function useStage(
     };
   }, [scope, when]);
 }
+
+/**
+ * Compiling shaders can stall the GPU for a moment on some machines, and that
+ * stall freezes whatever is moving on screen. Heavy 3D start-up steps await
+ * this first: it resolves at the next beat when the page is at rest, or after
+ * `limit` ms, whichever comes first.
+ */
+export const calm = (limit = 3000) =>
+  new Promise<void>((resolve) => {
+    const t0 = performance.now();
+    let still = 0;
+    const check = () => {
+      still = Math.abs(scrollState.velocity) < 40 ? still + 1 : 0;
+      if (still >= 4 || performance.now() - t0 > limit) resolve();
+      else requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });

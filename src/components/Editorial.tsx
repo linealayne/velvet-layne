@@ -8,22 +8,18 @@ const STEPS = [
   {
     title: "Start with the grid.",
     text: "Twelve columns and one baseline go in before a single word does. Everything that follows has somewhere to stand.",
-    caption: "Plate 1. Circles, offset.",
   },
   {
     title: "Choose two voices.",
     text: "A serif to speak and a grotesk to explain. Two typefaces make a conversation. Five make a crowd.",
-    caption: "Plate 2. Halftone, hand-plotted.",
   },
   {
     title: "Let the numbers be big.",
     text: "Scale is the cheapest drama there is. A numeral the size of a door tells you where you are without being asked.",
-    caption: "Plate 3. Half discs, stacked.",
   },
   {
     title: "Leave room.",
     text: "White space is not empty. It is the pause that lets the next thing land.",
-    caption: "Plate 4. Stripes and a quarter turn.",
   },
 ];
 
@@ -81,13 +77,7 @@ export default function Editorial() {
   );
 
   return (
-    <section ref={root} className="editorial" data-chapter="4" data-name="Editorial">
-      <div className="ed-grid ed-mast">
-        <span>Velvet Layne</span>
-        <span>Notes on order</span>
-        <span>Chapter four</span>
-      </div>
-
+    <section ref={root} className="editorial">
       <div className="ed-grid ed-open">
         <h2 className="ed-title">
           <span className="line"><span>Order is a</span></span>
@@ -111,7 +101,6 @@ export default function Editorial() {
             </div>
             <figure className="ed-figure">
               <div className="plate" dangerouslySetInnerHTML={{ __html: plateArt(i + 1) }} />
-              <figcaption>{step.caption}</figcaption>
             </figure>
           </li>
         ))}

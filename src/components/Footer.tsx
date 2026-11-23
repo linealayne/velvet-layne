@@ -6,18 +6,18 @@ import { gsap, ScrollTrigger, useStage, motionOn, isCoarse } from "@/lib/gsap";
 // The tracer alphabet: twelve marks drawn for this page. V and L for the name,
 // a single stroke for Linea ("line"), then a drop, a spark and friends.
 const MARKS: { color: string; d: string; fill?: boolean }[] = [
-  { color: "#ff3b30", d: "M4 5l8 15 8-15" },
-  { color: "#ffd60a", d: "M7 4v16h11" },
-  { color: "#f4f2ec", d: "M4 20L20 4" },
-  { color: "#ff4fa3", d: "M12 3c4 6 6 9 6 12a6 6 0 0 1-12 0c0-3 2-6 6-12z" },
-  { color: "#7df2c0", d: "M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z", fill: true },
-  { color: "#8fa4ff", d: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z" },
-  { color: "#ff4a1c", d: "M3 13c3-6 6-6 9 0s6 6 9 0" },
-  { color: "#f4f2ec", d: "M12 4v16M4 12h16" },
-  { color: "#ffd60a", d: "M4 15a8 8 0 0 1 16 0z", fill: true },
-  { color: "#ff4fa3", d: "M12 4l9 16H3z" },
-  { color: "#7df2c0", d: "M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9" },
-  { color: "#ff3b30", d: "M12 3l9 9-9 9-9-9z" },
+  { color: "#c4001d", d: "M4 5l8 15 8-15" },
+  { color: "#efe4d0", d: "M7 4v16h11" },
+  { color: "#ff4d00", d: "M4 20L20 4" },
+  { color: "#c9ced6", d: "M12 3c4 6 6 9 6 12a6 6 0 0 1-12 0c0-3 2-6 6-12z" },
+  { color: "#ff4d00", d: "M12 2l2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2z", fill: true },
+  { color: "#efe4d0", d: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z" },
+  { color: "#c4001d", d: "M3 13c3-6 6-6 9 0s6 6 9 0" },
+  { color: "#c9ced6", d: "M12 4v16M4 12h16" },
+  { color: "#ff4d00", d: "M4 15a8 8 0 0 1 16 0z", fill: true },
+  { color: "#efe4d0", d: "M12 4l9 16H3z" },
+  { color: "#c9ced6", d: "M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9" },
+  { color: "#c4001d", d: "M12 3l9 9-9 9-9-9z" },
 ];
 
 export default function Footer() {
@@ -118,7 +118,7 @@ export default function Footer() {
   );
 
   return (
-    <footer ref={root} className="footer" data-chapter="7" data-name="Tracers">
+    <footer ref={root} className="footer">
       <div className="tracers" aria-hidden="true">
         {MARKS.map((m, i) => (
           <span key={i} className="tracer">
@@ -138,10 +138,6 @@ export default function Footer() {
 
       <div className="foot-main">
         <h2>Want something like this?</h2>
-        <p>
-          Velvet Layne is a concept piece: seven styles, one scroll, nothing
-          for sale. Linea designs and builds the real ones.
-        </p>
         <a className="foot-cta" href="https://lineaautomations.com/start">
           Start a project
         </a>
@@ -149,8 +145,6 @@ export default function Footer() {
 
       <div className="foot-base">
         <a href="https://lineaautomations.com">Built by Layne at Linea</a>
-        <span className="foot-hint">Move around down here. The marks follow.</span>
-        <a href="#top">Back to the top</a>
       </div>
     </footer>
   );

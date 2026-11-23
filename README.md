@@ -1,6 +1,6 @@
 # VELVET LAYNE
 
-A design showcase by Layne at [Linea](https://lineaautomations.com). One long scroll, seven chapters, each in a completely different style.
+A design showcase by Layne at [Linea](https://lineaautomations.com). One long scroll that keeps changing style: a name you can look through, a manifesto, a gallery corridor, and a goodbye.
 
 Live: https://velvet-layne.vercel.app
 
