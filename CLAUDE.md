@@ -39,7 +39,10 @@ node scripts/grain.mjs                           # regenerate the film grain til
 node scripts/cold.mjs [url] [outDir]             # cold, throttled first visit to the Corridor
 node scripts/v4.mjs [url] [outDir] [run]         # velvet, pillar handoff, tracers, finale
 node scripts/v5.mjs [url] [outDir] [run] [part]  # letters, molten-to-velvet
-node scripts/v6.mjs [url] [outDir] [run] [part]  # hero on load/refresh, refresh mid-page, suction entrance
+node scripts/v6.mjs [url] [outDir] [run] [part]  # hero on load/refresh (its suction and mid-page parts are historical)
+node scripts/v7.mjs [url] [outDir] [run] [part]  # the "4" screen, the studio sequence, rebuilt letters, refresh to top, frame rate
+node scripts/hover.mjs [url] [sweeps] [engine]   # the hover test: every letter must answer every hover
+node scripts/studio-assets.mjs                   # re-fetch and compress the studio's Poly Haven textures
 ```
 
 `scripts/shots.mjs` uses `playwright-core`. It captures the hero at rest,
@@ -59,7 +62,7 @@ set is in `screenshots/`.
 | 1 | Hero | `Hero.tsx`, `ColorField.tsx`, `lib/glyphs.ts`, `lib/scenes.ts`, `lib/letterEngine.ts`, `lib/letters.worker.ts` | VELVET / LAYNE filling the screen over the molten colour field, plus the scroll cue. Each letter is a window onto a scene. |
 | 2 | Manifesto | `Manifesto.tsx` | A full screen of very dark oxblood velvet (shader) that you can brush. Four lines light up word by word. |
 | 3 | Editorial | `Editorial.tsx`, `lib/art.ts` | The light moment: warm tan paper, Swiss grid, oversized Bodoni numerals, SVG plates with mask reveals. |
-| 4 | The Corridor | `Corridor.tsx`, `CorridorScene.tsx`, `lib/posters.ts`, `public/work/` | The centrepiece. A three.js gallery tunnel: panels stream along floor, ceiling and walls into the vanishing point and never stop. |
+| 4 | The Corridor | `Corridor.tsx`, `CorridorScene.tsx`, `lib/studio.ts`, `lib/posters.ts`, `public/work/`, `public/studio/` | The centrepiece. First the studio sequence (the page is crumpled and thrown away in a designer's studio, and the studio is pulled into the dark), then a three.js gallery tunnel: panels stream along floor, ceiling and walls into the vanishing point and never stop. |
 | 5 | Dimension | `Dimension.tsx`, `Sculpture.tsx` | The iridescent chrome knot. |
 | 6 | Brutal | `Brutal.tsx` | Signal orange, hard borders, glitch on hover. |
 | 7 | Finale | `Finale.tsx`, `Footer.tsx` | MAKE / IT / YOURS. with two rings of tiles orbiting through the words, then the ask, the credit and the cursor tracers. |
@@ -72,9 +75,10 @@ Transitions (each pair uses a different one, none may repeat):
 2. Manifesto → Editorial: `columns`, paper drops in as grid columns. The
    bridge overlaps the end of the Manifesto (negative margin), so the pillars
    start falling the moment the last word has lit.
-3. Editorial → Corridor: the suction entrance. The page trembles, is pulled
-   back from its centre like a sheet into a drain, and the tunnel is seen
-   through the hole (`Corridor.tsx`, see below).
+3. Editorial → Corridor: the studio sequence. The "4" page is crumpled into
+   a ball and thrown in a bin, the room it was in is pulled apart brick by
+   brick, and its framed pictures fly off to become the tunnel
+   (`lib/studio.ts`, see below).
 4. Corridor → Dimension: `iris`, a red dot opens out of the black. It also
    overlaps the end of the Corridor so there is no black gap before the dot.
 5. Dimension → Brutal: `tiles`, hard-cut blocks, no easing
@@ -90,17 +94,17 @@ Every letter is a trailer for the show. Scenes are drawn in code in
 
 | Letter | Scene id | What plays inside it |
 |--------|----------|----------------------|
-| V | `vinyl` | Glossy black vinyl spinning, a sharp chrome streak sliding across the grooves |
+| V | `vinyl` | A record pressed in black lacquer: the grooves pull the studio out into chrome, orange and oxblood streaks, and the disc swells as it turns |
 | E | `marble` | Oxblood lacquer and liquid chrome marbling into each other |
 | L | `pour` | Molten chrome pouring through the letter, catching orange light |
 | V | `mercury` | Liquid mercury rippling, with the red field in its reflections |
 | E | `velvet` | Crushed oxblood velvet with a moving sheen (ties to the Manifesto) |
-| T | `corridor` | The Corridor in miniature, panels rushing in, glossy |
+| T | `corridor` | The Corridor in miniature, built of wet lacquer panels and black glass that mirrors them, a white-hot point at the far end |
 | L | `molten` | A white-hot pool of metal with orange sparks skating across it |
 | A | `nebula` | A slow liquid nebula in oxblood, orange and chrome |
 | Y | `chrome` | Liquid chrome with oxblood and orange. **The reference: do not change it.** |
 | N | `neon` | A red neon tube buzzing on, reflected in wet black chrome |
-| E | `blocks` | Glossy chrome and lacquer blocks snapping into a layout: what Linea does |
+| E | `blocks` | A layout snapping together out of poured blocks (liquid chrome, lacquer, black glass) on a wet floor that mirrors them: what Linea does |
 
 All eleven are glossy, liquid materials in the palette, written as fragment
 shaders in `src/lib/letterShader.ts`. The older 2D drawings of each letter
@@ -163,6 +167,22 @@ How it works:
     stand-in (a sliding reflection strip) while the shared shader was still
     compiling, then swapped to the real shader scene as soon as it was ready,
     in the middle of an activation. No letter can do that now.
+- **Every hover is answered (the dead-letter bug).** A scene wipes in, plays,
+  holds for half a second after the pointer leaves, then wipes out. The old
+  engine ignored a new hover that arrived during the wipe-out: it finished
+  wiping out and went idle with the pointer still on the letter, and nothing
+  ever started it again until the pointer left and came back. Sweeping back
+  and forth lands in that quarter-second window all the time, so letters
+  seemed to stop working "after a while". Now a letter asked for during its
+  wipe-out turns round and closes back up (phase 5 in `letterEngine.ts`).
+  - The engine reports each answered hover (`onLit`, a `lit` message from
+    the worker) and the page counts them in `data-lit` on the letter.
+    `scripts/hover.mjs` sweeps all eleven letters 150 times and requires
+    every count to go up, and photographs one letter per sweep. Run it after
+    touching the engine. Before the fix: 20 of 220 hovers missed.
+  - The shared WebGL canvas also survives a lost context now: the programs
+    are forgotten and compiled again, and a letter draws its 2D version in
+    the meantime.
 - Touch screens: letters fire on their own, one at a time, about every 2.3s in
   a shuffled order with no immediate repeat. Tapping a letter fires it at once.
   Steady scenes repaint at half rate there.
@@ -192,51 +212,7 @@ How it works:
 - In portrait (aspect under 0.8) the tunnel is narrower and taller with a
   wider field of view, one lane on the floor and ceiling, and fewer, larger
   panels spaced further apart so each can be read on a phone.
-- **The suction entrance (do not turn it back into ribbons, a fade, a
-  shrinking page or speed lines).** The Corridor's stage takes over one screen
-  early, on top of Editorial's last screen (`margin-top: -100svh`), and the
-  entrance is the first 32% of the chapter's scroll (`ENTRANCE` in
-  `Corridor.tsx`). `corridorState.vac` runs 0 to 1 across it.
-  - **The page as a texture.** `lib/pageTexture.ts` redraws Editorial's last
-    screen into a canvas from the DOM's own measurements: each word where the
-    browser put it (a `Range` per word), in its computed font; the step
-    rules; and the plates rasterised from their own SVG markup. It is
-    repainted at the moment of takeover (`capture()`), and handed to the scene
-    through `corridorState.page`.
-  - **The sheet.** `CorridorScene` draws that texture on a disc of fine rings
-    around the exact centre of the screen (104 x 144, or 56 x 72 on phones),
-    parented to the camera so it fills the screen whatever the lens does. The
-    disc is larger than the screen (`SHEET`): beyond the page's own edges it
-    is blank paper, so nothing behind it shows at the screen's edges while it
-    is drawn in. No depth test; it is drawn last, in the tunnel's own
-    renderer. One vertex shader (`SHEET_VERT`) does everything from `uP`:
-    - a *dent*: the centre is pushed back in depth, gaussian falloff;
-    - a *sink*: every point moves inward so that r squared falls by the same
-      amount `Q` everywhere, which is how a sheet flows into a drain (the
-      centre goes first and fastest, the page's edges are dragged in last);
-    - a *hole*: from `HOLE_OPENS` (0.4) a true hole of radius `a` opens at
-      the centre and grows until it has passed the corners of the screen;
-    - a *throat*: what has passed the rim runs down into the depth, goes
-      black, then thins away. It is black before it is thin, so no pale
-      paper ever lies over the tunnel.
-  - **The tunnel behind is never faded or dimmed.** It is complete, lit and
-    moving the whole time; it is simply not drawn until just before the hole
-    opens, because the sheet covers it. There is no crossfade anywhere.
-  - **The tremor.** A random offset of the whole sheet each frame (about 2px,
-    1px on phones) plus a hair of rotation, in the shader, not CSS. Its size
-    is `stir` (how hard the page is being scrolled, from
-    `scrollState.velocity`) times a curve that builds over the first third.
-    At rest `stir` is exactly zero and so is the offset: nothing moves while
-    nobody scrolls. The grain comes up and the edges darken with it.
-  - The stage is empty and see-through until this chapter's script has taken
-    over (`.cor-stage.is-set`), and the chapter's first screen has no
-    background, so before hydration (first load, or a refresh at the end of
-    Editorial) the real Editorial simply shows. After that the stage shows a
-    DOM copy of the page (`.vac-page`) until the sheet takes over at the
-    first movement (`p < 0.004`), so the handover is exact. Without WebGL
-    that copy fades into the dark.
-  - Scrubbed and fully reversible. Reduced motion: no entrance at all, a
-    clean cut to a still frame.
+- **The studio sequence** is the way in: see its own section below.
 - **It must be populated the instant it comes on screen, on a first visit.**
   How that is guaranteed:
   1. `lib/corridorAssets.ts` `preloadCorridor()` runs once the hero has
@@ -254,6 +230,94 @@ How it works:
      away.
   Check it with `node scripts/cold.mjs` (cache off, Fast 4G).
 - Reduced motion: one still frame of the tunnel.
+
+### The studio sequence (`lib/studio.ts`)
+
+The way into the Corridor, and the centrepiece of the site. The "4" page is a
+draft: it is crumpled up and thrown away in a designer's studio, the studio
+is pulled into the dark, and the framed work on its wall becomes the tunnel.
+
+It is drawn in the Corridor's own three.js scene and renderer. It takes the
+first 54% of the chapter's scroll (`ENTRANCE` in `Corridor.tsx`), and
+everything in it is a function of one number, `corridorState.vac` (`v`, 0 to
+1), so it scrubs both ways. The beats are the table `T` in `studio.ts`:
+
+| v | Beat | What happens |
+|---|------|--------------|
+| 0 - 0.24 | Crumple | The page (a finely divided sheet carrying the picture from `lib/pageTexture.ts`) wrinkles, then gathers round a ball. Vertex shader: `crumple()`. |
+| 0.15 - 0.34 | Pull back | The camera draws back from 2.6 units closer; the room is there. |
+| 0.33 | The throw | Wind-up, arc, the wall, the rim of the bin (which rattles once), the bin. |
+| 0.40 - 0.92 | Shake | Lamp swings and flickers, frames rattle on their nails, bricks jitter, more dust. |
+| 0.54 - 0.86 | Suction | The wall leaves brick by brick from the centre outward, then the floor boards. |
+| 0.60 - 0.79 | Frames | Each picture's frame, mat and glass come away and follow the bricks. |
+| 0.72 - 0.96 | Glide | The pictures fly to the tunnel's own panels and land on them. |
+| 0.74 - 0.90 | Dark | The lamp dies and is pulled in with the bin; the tunnel's dark clears. |
+
+- **The "4" screen it starts from.** The stage takes over the last screen of
+  Editorial, and that screen is exactly the "4" step: `.ed-step:last-child`
+  is a full screen tall and Editorial has no padding under it. Before v7 the
+  stage took over whatever lay in the bottom screen-height, which on a
+  shorter window cut off the "4", the heading and the top of the plate, and
+  left a seam where the copy met the real page. On short windows the plate
+  gets narrower rather than being cut.
+- **The paper.** A `MeshStandardMaterial` whose vertex stage is replaced by
+  `crumple(uv)`: wrinkles first (soft ridged noise at four sizes that shifts
+  as the sheet closes, so it ripples), then the sheet is wrapped round a
+  ball, edges meeting at the back, with lumps. Normals come from the same
+  function, so the folds are properly lit. At rest it shows the page exactly
+  as the browser drew it (`uFlat`); the room's light takes over as it folds.
+- **The throw runs on its own clock.** Once `v` passes 0.33 it plays in real
+  time (about 1.5s) and plays backwards if `v` drops back, so it reads as a
+  throw however slowly the page is scrolled. A fast scroll hurries it.
+  Everything else is scrubbed directly.
+- **Wall and floor are photographs cut into pieces.** One instanced box per
+  brick and per board (about 3,300 bricks on desktop, 1,800 on phones). Each
+  takes its texture coordinates from where it sits, so the assembled wall is
+  the photograph, seamless, with its real mortar. Their flight (come loose,
+  hang back, tumble away to a point in the distance, go dark) is all in the
+  vertex shader, from `uPull`.
+- **Light.** One warm `SpotLight` in the lamp (soft shadows, the only shadow
+  caster of light in the scene), a small fill near the camera for the paper,
+  and a Poly Haven HDRI at low strength for the room and for reflections in
+  the bin and the glass. Keep it dim: the pool of lamp light is the look.
+- **Film.** The room's materials do their own filmic tone mapping (`film()`
+  in `studio.ts`, the ACES fit) instead of the renderer's, so the tunnel's
+  unlit panels are untouched. On desktop the room is drawn through a gentle
+  depth-of-field pass (`DOF_FRAG` in `CorridorScene.tsx`): focus follows the
+  ball, then rests on the wall, and the pass switches off before the suction.
+  The site's film grain lies over all of it as always.
+- **Pictures to panels.** Each framed picture is assigned one of the tunnel's
+  own panels (`assign()` in `CorridorScene.tsx`). In flight the panel is
+  hidden; on landing the panel takes over, same picture, same place. The
+  picture's material goes from "print under a lamp" to exactly what the
+  panel draws (`uGlow`). The tunnel stands still until they have landed
+  (`T.flow`), then streams as it always has.
+- **The shake obeys the scroll.** Its size is `stir` (from
+  `scrollState.velocity`), which is exactly zero at rest.
+- **Nothing compiles on arrival.** Before the chapter is reached the scene
+  draws every state of the room once, each in its own task (with and without
+  depth of field: they are different programs). If something new is added to
+  the room, make sure one of those warm-up states shows it.
+- Phones: half-size textures, fewer bricks, a coarser sheet, a 1024 shadow
+  map, no depth of field.
+- Reduced motion: a clean cut from the "4" screen to a still of the studio
+  wall (a picture taken from the same scene, `.studio-still`), then a still
+  of the tunnel.
+- Without WebGL, or if the textures fail to load, there is no studio: the
+  page fades into the dark and the tunnel is there.
+
+**Outside assets (the only ones on the site).** All from Poly Haven, all CC0
+(public domain), fetched and compressed by `scripts/studio-assets.mjs` into
+`public/studio/` (about 0.7 MB for desktop, 0.2 MB for phones):
+
+| Asset | Used for | Page |
+|-------|----------|------|
+| Brick Wall 001 | wall: colour, normal, AO and roughness | https://polyhaven.com/a/brick_wall_001 |
+| Dark Wooden Planks | floor: colour, normal, AO and roughness | https://polyhaven.com/a/dark_wooden_planks |
+| Art Studio (HDRI) | soft room light and reflections | https://polyhaven.com/a/art_studio |
+
+The lamp, the bin, the frames, the dust and the paper are modelled in
+`studio.ts`. Nothing else from outside may be added; Poly Haven CC0 only.
 
 ### Manifesto: velvet, and how it arrives
 
@@ -362,37 +426,23 @@ static show: no bridges, sticky stages become ordinary sections, canvases and
 Sticky stages use CSS `position: sticky`, not ScrollTrigger pinning, so there
 is no pin spacing to get wrong and scroll is never hijacked.
 
-## Refreshing part way down
+## Every load starts at the top
 
-A refresh restores the scroll offset before most chapters have hydrated. What
-keeps that right:
+An inline script in `layout.tsx` (`topGate`) sets
+`history.scrollRestoration = "manual"` and scrolls to 0 before first paint
+(and again when the page is shown from the back/forward cache). A reload
+anywhere lands on the hero. This replaced trying to restore a position part
+way down, which could not be made reliable on iPhones.
+
+Still worth keeping from that work:
 
 - **Overlapping chapters are empty until their script runs.** The Manifesto
   (over the hero) and the Corridor's stage (over Editorial's last screen) are
   hidden by default in CSS; see their sections.
 - **No `once: true` scroll triggers.** They remove themselves from
-  ScrollTrigger's list when they have played. After a refresh below
-  Editorial several did so in the middle of a later chapter's refresh;
-  ScrollTrigger threw, and that chapter (the Corridor) stayed black. Use the
-  default `toggleActions` (plays once, never reverses) and leave the trigger
-  alive.
-- **Height guesses.** Chapters use `content-visibility: auto`, so an
-  unrendered chapter has a guessed height (`contain-intrinsic-size`).
-  Editorial, Brutal and the footer get guesses close to their real heights;
-  with the old 200svh guess a refresh in the Corridor came back two screens
-  further on. If those chapters change length, update the guesses.
-
-**Known and open:** in Playwright WebKit (iPhone 15 emulation), roughly one
-refresh in five below Editorial comes back one chapter further down. The
-chapter it lands on is drawn correctly. For a moment after the reload the
-Editorial section is missing from the page (it looks like React re-rendering
-that Suspense boundary on the client), so the restored offset is applied to
-a page that is one chapter short. Not reproduced in Chrome; not checked on a
-real iPhone. Turning off `content-visibility` for Editorial did not cure it
-and changed Editorial's height, so it was not kept.
-
-Check all of it with `node scripts/v6.mjs` (the `refresh` part prints where
-each refresh came back).
+  ScrollTrigger's list when they have played, and several doing so in the
+  middle of another trigger's refresh makes ScrollTrigger throw. Use the
+  default `toggleActions` (plays once, never reverses).
 
 ## Performance notes (keep these intact)
 
@@ -445,13 +495,15 @@ each refresh came back).
   one hot signal orange (`--signal`). No pinks, pastels or cute shapes. The
   hero colour field's own hue swing is the one exception and must not change.
 - **Do not change the look of the colour field shader** (`ColorField.tsx`).
-- **Original work only.** No copied code, assets, fonts, images, layouts or
+- **Original work only** (the one exception: the studio's three CC0 Poly
+  Haven assets, listed in its section). No copied code, assets, fonts, images, layouts or
   copy from the reference sites (warhol-arts.webflow.io, amo.co,
   oddymade.webflow.io) or anywhere else. They are a reference for motion,
   pacing and depth only. No real people, celebrity images, brand logos or
   packaging anywhere.
 - **Every visual is generated here** (shader, canvas, SVG, CSS, three.js),
-  except the captures of Layne's own demo sites in the Corridor.
+  except the captures of Layne's own demo sites in the Corridor and the
+  studio's brick, boards and room light from Poly Haven.
 - **Free, properly licensed fonts only.** No stock photos, fake client logos,
   fake testimonials or fake stats. Copy must be true of this page.
 - **Performance:** 60fps target on a mid-range laptop, everything paused off

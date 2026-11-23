@@ -14,33 +14,30 @@ const CorridorScene = dynamic(() => import("./CorridorScene"), { ssr: false });
 const LINES = ["Walk the work.", "Every wall is mine.", "Nothing borrowed.", "Keep going."];
 
 /** The share of this chapter's scroll that the entrance takes. */
-const ENTRANCE = 0.32;
+const ENTRANCE = 0.54;
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 /**
  * Chapter 4, the centrepiece, and the way into it.
  *
- * The entrance: Editorial's last page is sucked into the tunnel. This
- * chapter's stage starts one screen early, over the last screen of Editorial.
- * A picture of exactly that screen is painted to a canvas
- * (`lib/pageTexture.ts`) and handed to the three.js scene, which shows it on
- * a sheet that at first is simply the flat page, full screen. Scrolling then
- * (all in `CorridorScene`'s vertex shader):
- *   - the page trembles, finely, and only while it is being scrolled;
- *   - a point at the exact centre pulls it back: the centre sinks in depth and
- *     everything around bends and stretches toward it, faster and faster;
- *   - the dark opens at the bottom of the funnel and the tunnel, complete and
- *     moving, is seen through it; the paper darkens as it runs down the
- *     throat, the edges are dragged in last, and it is gone;
- *   - the frame arrives from the depth.
- * One motion, scroll-scrubbed and fully reversible.
+ * The way in is the studio sequence (lib/studio.ts): the "4" page is a draft.
+ * It is crumpled up and thrown away in a designer's studio, the studio is
+ * pulled into the dark brick by brick, and the framed work on its wall flies
+ * off to become the tunnel. It takes the first 54% of this chapter's scroll
+ * (`ENTRANCE`); `corridorState.vac` runs 0 to 1 across it, and everything in
+ * the studio is a function of that number, so it scrubs both ways.
  *
- * Before this chapter's script has taken over (first load, or a refresh part
- * way down), the stage is empty and see-through, so nothing of the Corridor
- * can sit on top of Editorial. Once it has (`.is-set`), the stage shows a DOM
- * copy of the page until the sheet takes over at the first movement, so the
- * handover from the real Editorial is exact.
+ * This chapter's stage starts one screen early, over the last screen of
+ * Editorial, which is exactly the "4" step (see `.ed-step:last-child` in
+ * globals.css). A picture of that screen is painted to a canvas
+ * (`lib/pageTexture.ts`) and becomes the sheet of paper in the studio.
+ *
+ * Before this chapter's script has taken over the stage is empty and
+ * see-through, so nothing of the Corridor can sit on top of Editorial. Once
+ * it has (`.is-set`), the stage shows a DOM copy of the page until the paper
+ * takes over at the first movement, so the handover from the real Editorial
+ * is exact.
  *
  * Loading is front-loaded so nothing is blank on arrival: the panel images
  * are fetched and decoded once the hero has settled (`preloadCorridor`, from
@@ -104,7 +101,7 @@ export default function Corridor() {
     };
 
     const apply = (P: number) => {
-      const k = clamp01((P - 0.42) / 0.5) * 0.999;
+      const k = clamp01((P - (ENTRANCE + 0.03)) / (0.93 - ENTRANCE - 0.03)) * 0.999;
       const i = Math.floor(k * lines.length);
       if (i !== active) {
         active = i;
@@ -113,7 +110,7 @@ export default function Corridor() {
       const p = clamp01(P / ENTRANCE);
       corridorState.vac = p;
       if (corridorState.sheet) {
-        // The sheet is the page from the first movement on.
+        // The paper is the page from the first movement on.
         page.style.visibility = p < 0.004 ? "visible" : "hidden";
         page.style.opacity = "1";
       } else {
@@ -139,8 +136,8 @@ export default function Corridor() {
     tl.fromTo(
       ".cor-frame",
       { opacity: 0, scale: 0.08 },
-      { opacity: 1, scale: 1, duration: 0.12, ease: "power2.out" },
-      ENTRANCE - 0.045
+      { opacity: 1, scale: 1, duration: 0.07, ease: "power2.out" },
+      ENTRANCE - 0.035
     )
       .to(".cor-world", { opacity: 0, duration: 0.07 }, 0.93)
       .to(".cor-frame", { opacity: 0, scale: 0.2, duration: 0.07, ease: "power2.in" }, 0.93);
@@ -161,6 +158,11 @@ export default function Corridor() {
 
   return (
     <section ref={root} className="corridor">
+      {/* Reduced motion only: a still of the studio wall, between the "4" screen and the tunnel. */}
+      <div className="studio-still" aria-hidden="true">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img alt="" />
+      </div>
       <div className="cor-stage">
         <div className="cor-world">
           {near && <CorridorScene />}

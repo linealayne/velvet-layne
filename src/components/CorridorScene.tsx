@@ -4,149 +4,82 @@ import { useEffect, useRef } from "react";
 import {
   BufferGeometry,
   CanvasTexture,
-  Color,
   Float32BufferAttribute,
   Fog,
   Group,
+  HalfFloatType,
   LineBasicMaterial,
   LineSegments,
   Mesh,
   MeshBasicMaterial,
+  OrthographicCamera,
+  PCFSoftShadowMap,
   PerspectiveCamera,
   PlaneGeometry,
+  PMREMGenerator,
+  Quaternion,
   Scene,
   ShaderMaterial,
   SRGBColorSpace,
+  Texture,
+  Vector2,
+  Vector3,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from "three";
 import { ScrollTrigger, scrollState, calm, motionOn, isSmall } from "@/lib/gsap";
 import { preloadCorridor } from "@/lib/corridorAssets";
-import { corridorState, FOG_FAR, FOG_NEAR, HOLE_OPENS } from "@/lib/corridorState";
+import { corridorState, FOG_FAR, FOG_NEAR } from "@/lib/corridorState";
+import { createStudio, DEPTH_RANGE, T, type Pic, type Studio } from "@/lib/studio";
 
 const LENGTH = 52; // how far the tunnel runs before a panel wraps
 const BASE_SPEED = 6.5; // units per second, always
 
 type Slot = { mesh: Mesh; base: number; lap: number; shape: "port" | "land" };
 
-/** The sheet's radius, in half-diagonals of the screen. */
-const SHEET = 1.32;
-
-/**
- * The suction entrance. The page is printed on a sheet stretched across the
- * mouth of the tunnel: a disc of fine rings around the exact centre of the
- * screen, larger than the screen, blank paper beyond the page's own edges.
- * Each vertex knows where it lies on the flat sheet (`q0`); the shader moves
- * it the way a sheet moves into a drain:
- *   - a dent: the centre is pushed back in depth with a smooth radial falloff;
- *   - a sink: the sheet flows inward. Area flows in at one rate everywhere
- *     (r squared falls by the same amount), so the centre goes first and
- *     fastest and the edges of the page are dragged in last;
- *   - a throat: what has passed the rim of the hole runs down into the depth,
- *     darkening, and is gone. The hole is a true hole: the tunnel behind is
- *     seen through it.
- * At uP = 0 it is exactly the flat page filling the screen.
- */
-const SHEET_VERT = /* glsl */ `
-uniform float uP;
-uniform vec2 uPage;
-uniform float uD0;
-uniform float uRc;
-uniform vec3 uShake;
-varying vec2 vUv;
-varying float vShade;
-varying float vAlpha;
-
-float ramp(float a,float b,float x){return clamp((x-a)/(b-a),0.,1.);}
-
-void main(){
-  float t=length(position.xy);
-  vec2 dir=t>1e-5?position.xy/t:vec2(1.,0.);
-  float r0=uRc*SHEET*pow(t,1.12);
-  vec2 q0=dir*r0;
-  vUv=q0/uPage+.5;
-  float rc2=uRc*uRc;
-  float r2=r0*r0;
-
-  // The dent: gentle at first, then it accelerates. Once the hole is wide
-  // the funnel shallows, so its mouth opens out toward the screen.
-  float g=ramp(.1,.66,uP);
-  float D=3.4*g*g*(1.-.72*smoothstep(.5,.85,uP));
-  float w=uRc*(.13+.2*g);
-
-  // The sink. Q is how much of the sheet (as r squared) has been swallowed.
-  float s=ramp(.26,.93,uP);
-  float Q=QMAX*rc2*pow(s,2.2);
-  // The hole: nothing at first, then the dark opens at the centre.
-  float open=smoothstep(HOLE,HOLE+.16,uP);
-  float a2=Q*.85*open;
-  float a=sqrt(a2);
-
-  float sig2=r2-Q;
-  float rho;float depth;float thr=0.;
-  if(sig2>=0.){
-    // Still on the sheet, drawn in toward the drain.
-    rho=sqrt(sig2+a2);
-    depth=D*exp(-sig2/(w*w));
-  }else{
-    // Past the rim: down the throat.
-    thr=min(-sig2/(.22*rc2),1.);
-    rho=a*(1.-.3*thr);
-    depth=D+3.6*thr;
-  }
-
-  vec2 p=dir*rho;
-  // The tremor: a tiny offset and turn of the whole sheet.
-  float cr=cos(uShake.z),sr=sin(uShake.z);
-  p=vec2(p.x*cr-p.y*sr,p.x*sr+p.y*cr)+uShake.xy;
-
-  // Paper darkens as it stretches down into the funnel.
-  // By the rim it is in shadow, and it is black before it thins away, so
-  // no pale paper ever lies over the tunnel.
-  float sink=clamp(depth/3.4,0.,1.);
-  float lip=sig2>=0.?exp(-sig2/(w*w)):1.;
-  vShade=mix(1.,.2,max(pow(sink,.85),.85*lip*open));
-  // The walls of the dent catch the light on one side.
-  float slope=sig2>=0.?2.*sqrt(sig2)/(w*w)*depth:0.;
-  vShade*=1.-.24*clamp(slope*.5,0.,1.)*dot(dir,vec2(-.58,.81));
-  vShade*=1.-smoothstep(0.,.3,thr);
-  vAlpha=1.-smoothstep(.28,.8,thr);
-
-  gl_Position=projectionMatrix*modelViewMatrix*vec4(p,-uD0-depth,1.);
-}`;
-
-const SHEET_FRAG = /* glsl */ `
-uniform sampler2D uMap;
-uniform vec3 uPaper;
-uniform float uGrain;
-uniform float uEdge;
-uniform float uSeed;
-varying vec2 vUv;
-varying float vShade;
-varying float vAlpha;
-float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
-void main(){
-  if(vAlpha<.004)discard;
-  // Beyond the page's own edge the sheet is blank paper.
-  vec2 in2=step(vec2(0.),vUv)*step(vUv,vec2(1.));
-  vec3 c=mix(uPaper,texture2D(uMap,clamp(vUv,0.,1.)).rgb,in2.x*in2.y);
-  // While it trembles the edges darken a little and the grain comes up.
-  c*=1.-uEdge*smoothstep(.3,.74,length(vUv-.5));
-  c+=(hash(gl_FragCoord.xy+uSeed)-.5)*uGrain;
-  gl_FragColor=vec4(c*vShade,vAlpha);
-  #include <colorspace_fragment>
-}`;
-
-// The whole sheet (and the last of its throat) must be gone by the end.
-const QMAX = SHEET * SHEET + 0.3;
-const sheetVert = SHEET_VERT.replaceAll("QMAX", QMAX.toFixed(3))
-  .replaceAll("SHEET", SHEET.toFixed(3))
-  .replaceAll("HOLE", HOLE_OPENS.toFixed(3));
-const sheetFrag = SHEET_FRAG;
-
 const smooth = (a: number, b: number, v: number) => {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
+
+/**
+ * Depth of field, for the studio only. The room is drawn into a float target
+ * whose alpha holds each pixel's distance (see `film` in lib/studio.ts); this
+ * pass blurs by how far that distance is from the one in focus. Gentle: a few
+ * pixels at most. Not used on phones, and not used at all once it has faded
+ * out, so the tunnel is always drawn straight to the screen as before.
+ */
+const DOF_FRAG = /* glsl */ `
+uniform sampler2D tColor;
+uniform vec2 uPx;
+uniform float uFocus;
+uniform float uAmount;
+uniform float uMax;
+varying vec2 vUv;
+float coc(float a){
+  float d=max(a*${DEPTH_RANGE}.,.05);
+  return clamp(abs(1./uFocus-1./d)*1.5*uAmount,0.,1.);
+}
+void main(){
+  vec4 c0=texture2D(tColor,vUv);
+  float r0=coc(c0.a);
+  vec3 sum=c0.rgb;
+  float wsum=1.;
+  for(int i=0;i<18;i++){
+    float fi=float(i)+.5;
+    float rad=sqrt(fi/18.);
+    float ang=fi*2.39996;
+    vec4 s=texture2D(tColor,vUv+vec2(cos(ang),sin(ang))*rad*uMax*uPx);
+    // a neighbour counts if its own blur reaches here, or if this pixel is
+    // blurred and the neighbour is not something sharp in front of it
+    float reach=max(coc(s.a),r0*step(c0.a-.01,s.a));
+    float w=clamp((reach-rad)*5.+1.,0.,1.);
+    sum+=s.rgb*w;
+    wsum+=w;
+  }
+  gl_FragColor=vec4(sum/wsum,1.);
+  #include <colorspace_fragment>
+}`;
 
 const pause = () =>
   new Promise<void>((resolve) => {
@@ -159,11 +92,14 @@ const pause = () =>
  * walls streaming away toward the vanishing point. It never stops. Scrolling
  * pushes it faster; scrolling back up reverses it for a moment.
  *
+ * The same scene also holds the studio (lib/studio.ts), the room the way in
+ * passes through. While `corridorState.vac` is below 1 the studio is what is
+ * drawn; its framed pictures then fly to the tunnel's own panels, and from
+ * vac = 1 on this is the tunnel exactly as it has always been.
+ *
  * This component is mounted long before the chapter is reached. By the time
  * the visitor arrives the textures are already on the GPU and the first frame
- * has been drawn, so the tunnel is populated and moving the instant it shows.
- * A capture that has not arrived yet shows its placeholder (a solid colour and
- * the site's name) and fades up to the real image when it lands.
+ * has been drawn, so nothing is blank and nothing pops in.
  *
  * In portrait the tunnel is narrower and taller, with fewer, larger panels.
  */
@@ -195,15 +131,20 @@ export default function CorridorScene() {
       });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
       renderer.setClearColor(0x000000, 1);
+      // Only the studio's lamp casts shadows; the tunnel has no lights at all.
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = PCFSoftShadowMap;
       host.appendChild(renderer.domElement);
 
       const scene = new Scene();
-      scene.fog = new Fog(0x000000, FOG_NEAR, FOG_FAR);
-      const camera = new PerspectiveCamera(62, 1, 0.1, LENGTH + 10);
+      const fog = new Fog(0x000000, FOG_NEAR, FOG_FAR);
+      scene.fog = fog;
+      const fogU = { value: new Vector2(FOG_NEAR, FOG_FAR) };
+      const camera = new PerspectiveCamera(62, 1, 0.1, LENGTH + 30);
       const unit = new PlaneGeometry(1, 1);
       cleanups.push(() => unit.dispose());
 
-      await assets.postersDone;
+      const [studioSet] = await Promise.all([assets.studio, assets.postersDone]);
       await pause();
       if (disposed) return;
 
@@ -241,6 +182,35 @@ export default function CorridorScene() {
         return mat;
       });
 
+      // The studio.
+      let studio: Studio | null = null;
+      if (studioSet) {
+        const envTex = new Texture(studioSet.room);
+        envTex.colorSpace = SRGBColorSpace;
+        envTex.needsUpdate = true;
+        const pmrem = new PMREMGenerator(renderer);
+        const env = pmrem.fromEquirectangular(envTex);
+        scene.environment = env.texture;
+        scene.environmentIntensity = 0.16;
+        envTex.dispose();
+        pmrem.dispose();
+        studio = createStudio({
+          renderer,
+          small,
+          images: studioSet,
+          art: { port: port.map((m) => m.map!), land: land.map((m) => m.map!) },
+          fog: fogU,
+        });
+        scene.add(studio.group);
+        const made = studio;
+        cleanups.push(() => {
+          made.dispose();
+          env.dispose();
+        });
+      }
+      await pause();
+      if (disposed) return;
+
       // Panels.
       const panels = new Group();
       scene.add(panels);
@@ -254,77 +224,26 @@ export default function CorridorScene() {
         return pool[counter++ % pool.length];
       };
 
-      // The entrance: Editorial's last screen, as a texture, on a sheet that
-      // rides with the camera and at rest exactly fills the screen. It is the
-      // front-most thing (no depth test), drawn after the tunnel.
-      const blank = document.createElement("canvas");
-      blank.width = blank.height = 2;
-      let pageTex = new CanvasTexture(corridorState.page ?? blank);
-      pageTex.colorSpace = SRGBColorSpace;
+      // The page, as a texture for the sheet of paper in the studio.
+      let pageTex: CanvasTexture | null = null;
       let pageSeen = -1;
-      const D0 = 4;
-      const paper = new Color(
-        getComputedStyle(document.documentElement).getPropertyValue("--paper").trim() || "#d9c8a9"
-      );
-      const sheetMat = new ShaderMaterial({
-        vertexShader: sheetVert,
-        fragmentShader: sheetFrag,
-        transparent: true,
-        depthTest: false,
-        depthWrite: false,
-        uniforms: {
-          uP: { value: 0 },
-          uPage: { value: [1, 1] },
-          uD0: { value: D0 },
-          uRc: { value: 1 },
-          uShake: { value: [0, 0, 0] },
-          uMap: { value: pageTex },
-          uPaper: { value: paper },
-          uGrain: { value: 0 },
-          uEdge: { value: 0 },
-          uSeed: { value: 0 },
-        },
-      });
-      // A disc of rings around the centre: the pull is radial, so the mesh is.
-      // Phones get a coarser one.
-      const sheetGeo = (() => {
-        const rings = small ? 56 : 104;
-        const sectors = small ? 72 : 144;
-        const pos: number[] = [];
-        const index: number[] = [];
-        for (let r = 0; r <= rings; r++) {
-          for (let k = 0; k <= sectors; k++) {
-            const th = (k / sectors) * Math.PI * 2;
-            pos.push((Math.cos(th) * r) / rings, (Math.sin(th) * r) / rings, 0);
-          }
-        }
-        const row = sectors + 1;
-        for (let r = 0; r < rings; r++) {
-          for (let k = 0; k < sectors; k++) {
-            const o = r * row + k;
-            index.push(o, o + row, o + 1, o + 1, o + row, o + row + 1);
-          }
-        }
-        const geo = new BufferGeometry();
-        geo.setAttribute("position", new Float32BufferAttribute(pos, 3));
-        geo.setIndex(index);
-        return geo;
-      })();
-      const sheet = new Mesh(sheetGeo, sheetMat);
-      sheet.frustumCulled = false;
-      sheet.renderOrder = 5;
-      sheet.visible = false;
-      scene.add(camera);
-      camera.add(sheet);
-      cleanups.push(() => {
-        sheetMat.dispose();
-        sheetGeo.dispose();
-        pageTex.dispose();
-      });
+      cleanups.push(() => pageTex?.dispose());
 
-
+      /* ── The pictures' way from the studio wall to the tunnel ──
+         Each framed picture is given one of the tunnel's own panels to fly
+         to. While it is on its way that panel is hidden; when it lands the
+         panel takes over, showing the same picture in the same place. */
+      const targets = new Map<Pic, Slot>();
+      const hidden = new Set<Slot>();
+      let lastVac = 1;
+      const release = () => {
+        hidden.forEach((s) => (s.mesh.visible = true));
+        hidden.clear();
+        targets.clear();
+      };
 
       const layout = (aspect: number) => {
+        release();
         panels.clear();
         slots = [];
         counter = 0;
@@ -404,6 +323,7 @@ export default function CorridorScene() {
         camera.fov = baseFov;
         camera.updateProjectionMatrix();
         rails();
+        studio?.layout(aspect, baseFov, H);
       };
 
       // Structure: corner rails and ribs, so the depth reads even between panels.
@@ -430,20 +350,124 @@ export default function CorridorScene() {
       };
       cleanups.push(() => ribs?.geometry.dispose());
 
+      const assign = (fromInside: boolean) => {
+        if (!studio) return;
+        release();
+        const free = { port: [] as Slot[], land: [] as Slot[] };
+        // nearest panels first, and only ones in front of the camera
+        [...slots]
+          .filter((s) => s.mesh.position.z < -1.2 && s.mesh.position.z > -30)
+          .sort((a, b) => b.mesh.position.z - a.mesh.position.z)
+          .forEach((s) => free[s.shape].push(s));
+        for (const p of studio.pics) {
+          const slot = free[p.shape].shift();
+          if (!slot) continue;
+          targets.set(p, slot);
+          const mat = slot.mesh.material as MeshBasicMaterial;
+          if (fromInside) {
+            // coming back out of the tunnel: the picture is whatever the panel shows
+            p.material.map = mat.map;
+          } else {
+            const same = pool.find((m) => m.map === p.material.map);
+            if (same) slot.mesh.material = same;
+          }
+        }
+      };
+      const far = new Vector3(0, 0, -60);
+      const qa = new Quaternion();
+      const glide = (vac: number) => {
+        if (!studio) return;
+        for (const p of studio.pics) {
+          const slot = targets.get(p);
+          const k = studio.glide(vac, p);
+          if (!slot) {
+            // no panel free for it (small tunnels): it follows its frame away
+            p.art.position.copy(p.home).lerp(far, k * k * k);
+            p.art.quaternion.copy(p.homeQ);
+            p.art.scale.set(p.w, p.h, 1);
+            p.glow.value = 0;
+            p.art.visible = k < 0.99;
+            continue;
+          }
+          if (k >= 1) {
+            p.art.visible = false;
+            if (hidden.delete(slot)) slot.mesh.visible = true;
+            continue;
+          }
+          if (!hidden.has(slot)) {
+            hidden.add(slot);
+            slot.mesh.visible = false;
+          }
+          p.art.visible = true;
+          p.art.position.lerpVectors(p.home, slot.mesh.position, k);
+          // it comes off the wall toward you before it turns into place
+          p.art.position.z += Math.sin(Math.PI * k) * 1.1 * (1 - k);
+          qa.copy(p.homeQ).slerp(slot.mesh.quaternion, k);
+          p.art.quaternion.copy(qa);
+          p.art.scale.set(p.w + (slot.mesh.scale.x - p.w) * k, p.h + (slot.mesh.scale.y - p.h) * k, 1);
+          // the room is going dark: the picture begins to show by its own light
+          p.glow.value = smooth(0, 0.5, k);
+        }
+      };
+
+      /* ── Depth of field (desktop) ── */
+      const dof = !small && !!studio && renderer.capabilities.isWebGL2;
+      let target: WebGLRenderTarget | null = null;
+      const post = new ShaderMaterial({
+        uniforms: {
+          tColor: { value: null },
+          uPx: { value: new Vector2(1, 1) },
+          uFocus: { value: 4 },
+          uAmount: { value: 0 },
+          uMax: { value: 9 },
+        },
+        vertexShader: "varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}",
+        fragmentShader: DOF_FRAG,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+      });
+      const quad = new Mesh(new PlaneGeometry(2, 2), post);
+      quad.frustumCulled = false;
+      const postScene = new Scene();
+      postScene.add(quad);
+      const postCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      cleanups.push(() => {
+        post.dispose();
+        quad.geometry.dispose();
+        target?.dispose();
+      });
+
       let zoff = 1.3;
       let sway = 1;
       let dimmed = false;
       let stir = 0;
-      let seed = 0;
-      const shake = [0, 0, 0];
+      let clock = 0;
       let speed = BASE_SPEED;
       const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
       const mod = (a: number, n: number) => ((a % n) + n) % n;
 
-      const frame = (dt: number) => {
-        const target = BASE_SPEED + Math.max(-24, Math.min(30, scrollState.velocity * 0.012));
-        speed += (target - speed) * 0.07;
-        zoff += speed * dt;
+      const frame = (dt: number, forceVac?: number, plain = false) => {
+        const vac = forceVac ?? (moving ? corridorState.vac : 1);
+        // A fresh picture of the page?
+        if (studio && corridorState.page && corridorState.pageVersion !== pageSeen) {
+          pageSeen = corridorState.pageVersion;
+          pageTex?.dispose();
+          pageTex = new CanvasTexture(corridorState.page);
+          pageTex.colorSpace = SRGBColorSpace;
+          pageTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+          studio.setPage(pageTex);
+          corridorState.sheet = true;
+        }
+        const inStudio = !!studio && vac < 1 && (pageSeen >= 0 || forceVac !== undefined);
+        const inside = inStudio ? 0 : 1;
+        clock += Math.max(dt, 0);
+
+        // The tunnel stands still until the pictures have landed, then streams.
+        const flow = inStudio ? smooth(T.flow[0], T.flow[1], vac) : 1;
+        const want = BASE_SPEED + Math.max(-24, Math.min(30, scrollState.velocity * 0.012));
+        speed += (want - speed) * 0.07;
+        zoff += speed * dt * flow;
         for (const s of slots) {
           const d = s.base + zoff;
           const lap = Math.floor(d / LENGTH);
@@ -460,77 +484,74 @@ export default function CorridorScene() {
           fades[i].userData.fade = c;
           if (c >= 1) fades.splice(i, 1);
         }
-        const vac = moving ? corridorState.vac : 1;
-        const inside = vac >= 1 ? 1 : 0;
         if (fades.length || dimmed) {
           dimmed = fades.length > 0;
           for (const m of pool) m.color.setScalar(m.userData.fade);
         }
-        // A fresh picture of the page?
-        if (corridorState.page && corridorState.pageVersion !== pageSeen) {
-          pageSeen = corridorState.pageVersion;
-          pageTex.dispose();
-          if (pageTex.image !== corridorState.page) {
-            pageTex = new CanvasTexture(corridorState.page);
-            pageTex.colorSpace = SRGBColorSpace;
-            pageTex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-            sheetMat.uniforms.uMap.value = pageTex;
-          } else {
-            pageTex.needsUpdate = true;
-          }
-          corridorState.sheet = true;
-        }
-        sheet.visible = moving && pageSeen >= 0 && vac < 0.94;
-        // Until the hole opens the sheet covers everything: the tunnel behind
-        // it runs on, but need not be drawn. It is drawn, complete and lit,
-        // from just before the dark opens.
-        panels.visible = !sheet.visible || vac > HOLE_OPENS - 0.05;
-        if (ribs) ribs.visible = panels.visible;
 
-        // During the entrance the camera holds dead still.
+        // The shake lives on scrolling alone: it follows how hard the page is
+        // being pulled and is exactly zero at rest.
+        const pulling = Math.min(1, Math.abs(scrollState.velocity) / 900);
+        stir += (pulling - stir) * (pulling > stir ? 0.3 : 0.12);
+        if (pulling < 0.012 && stir < 0.02) stir = 0;
+
         pointer.x += (pointer.tx - pointer.x) * 0.05;
         pointer.y += (pointer.ty - pointer.y) * 0.05;
         sway += (inside - sway) * 0.06;
-        camera.rotation.y = -pointer.x * 0.07 * sway;
-        camera.rotation.x = -pointer.y * 0.045 * sway;
-        const fov = baseFov + Math.min(12, Math.abs(speed - BASE_SPEED) * 0.45) * sway;
-        if (Math.abs(fov - camera.fov) > 0.05) {
-          camera.fov = fov;
-          camera.updateProjectionMatrix();
-        }
+        let focus: { distance: number; amount: number } | null = null;
 
-        if (sheet.visible) {
-          const u = sheetMat.uniforms;
-          // The sheet fills the screen whatever the lens is doing.
-          const hs = 2 * D0 * Math.tan((camera.fov * Math.PI) / 360);
-          const ws = hs * camera.aspect;
-          u.uPage.value = [ws, hs];
-          u.uRc.value = Math.hypot(ws, hs) / 2;
-          u.uP.value = vac;
-          // The tremor lives on scrolling alone: it follows how hard the page
-          // is being pulled and is exactly zero at rest.
-          const want = Math.min(1, Math.abs(scrollState.velocity) / 900);
-          stir += (want - stir) * (want > stir ? 0.3 : 0.12);
-          if (want < 0.012 && stir < 0.02) stir = 0;
-          const build = smooth(0, 0.34, vac) * (1 - 0.75 * smooth(0.6, 0.9, vac));
-          const amp = stir * build * (small ? 1.15 : 2.2) * (hs / Math.max(1, host.clientHeight));
-          if (amp > 0) {
-            // Irregular, tight, never a swing: a new random pull every frame,
-            // lightly held over from the last.
-            shake[0] += ((Math.random() * 2 - 1) * amp - shake[0]) * 0.7;
-            shake[1] += ((Math.random() * 2 - 1) * amp - shake[1]) * 0.7;
-            shake[2] += ((Math.random() * 2 - 1) * amp * 0.07 - shake[2]) * 0.7;
-            seed = (seed + 17.37) % 289;
-          } else {
-            shake[0] = shake[1] = shake[2] = 0;
+        if (inStudio && studio) {
+          studio.group.visible = true;
+          studio.update(vac, clock, dt, moving ? stir : 0);
+          // Which panel each picture flies to is settled once per pass.
+          const inGlide = vac >= T.glide - 0.03;
+          if (inGlide && !targets.size) assign(lastVac >= 1);
+          else if (!inGlide && targets.size) release();
+          glide(vac);
+          const cam = studio.camera(vac);
+          camera.position.set(0, 0, cam.z);
+          camera.rotation.set(0, cam.yaw, 0);
+          if (Math.abs(camera.fov - baseFov) > 0.001) {
+            camera.fov = baseFov;
+            camera.updateProjectionMatrix();
           }
-          u.uShake.value = shake;
-          u.uSeed.value = seed;
-          u.uGrain.value = 0.045 * smooth(0, 0.36, vac);
-          u.uEdge.value = 0.3 * smooth(0.02, 0.42, vac) * (1 - smooth(0.5, 0.8, vac));
+          sway = 0;
+          // The dark clears down the tunnel as the pictures arrive.
+          const lift = smooth(T.fog[0], T.fog[1], vac);
+          fog.near = 0.05 + (FOG_NEAR - 0.05) * lift;
+          fog.far = 0.1 + (FOG_FAR - 0.1) * lift;
+          panels.visible = vac > T.glide - 0.02;
+          if (dof && !plain) focus = studio.focus(vac, cam.z);
+        } else {
+          if (studio) studio.group.visible = false;
+          if (targets.size) release();
+          camera.position.set(0, 0, 0);
+          camera.rotation.y = -pointer.x * 0.07 * sway;
+          camera.rotation.x = -pointer.y * 0.045 * sway;
+          const fov = baseFov + Math.min(12, Math.abs(speed - BASE_SPEED) * 0.45) * sway;
+          if (Math.abs(fov - camera.fov) > 0.05) {
+            camera.fov = fov;
+            camera.updateProjectionMatrix();
+          }
+          fog.near = FOG_NEAR;
+          fog.far = FOG_FAR;
+          panels.visible = true;
         }
+        fogU.value.set(fog.near, fog.far);
+        if (ribs) ribs.visible = panels.visible;
+        lastVac = vac;
 
-        renderer.render(scene, camera);
+        if (focus && focus.amount > 0.004 && target) {
+          renderer.setRenderTarget(target);
+          renderer.render(scene, camera);
+          renderer.setRenderTarget(null);
+          post.uniforms.tColor.value = target.texture;
+          post.uniforms.uFocus.value = focus.distance;
+          post.uniforms.uAmount.value = focus.amount;
+          renderer.render(postScene, postCam);
+        } else {
+          renderer.render(scene, camera);
+        }
       };
 
       let shapeKey = -1;
@@ -541,6 +562,13 @@ export default function CorridorScene() {
         renderer.setSize(w, h, false);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
+        if (dof) {
+          const size = renderer.getDrawingBufferSize(new Vector2());
+          if (!target) target = new WebGLRenderTarget(size.x, size.y, { type: HalfFloatType, samples: 4 });
+          else target.setSize(size.x, size.y);
+          post.uniforms.uPx.value.set(1 / size.x, 1 / size.y);
+          post.uniforms.uMax.value = 7 * renderer.getPixelRatio();
+        }
         const key = Math.round((w / h) * 10);
         if (key !== shapeKey) {
           shapeKey = key;
@@ -567,13 +595,49 @@ export default function CorridorScene() {
       });
       ro.observe(host);
       cleanups.push(() => ro.disconnect());
+
+      if (!moving) {
+        // Reduced motion: one still of the studio wall (the ball already in
+        // the bin), handed to the page as a picture, then one still of the
+        // tunnel, which stays in this canvas.
+        const still = section.querySelector<HTMLImageElement>(".studio-still img");
+        if (studio && still) {
+          frame(60, 0.46);
+          still.src = renderer.domElement.toDataURL("image/jpeg", 0.86);
+          section.classList.add("has-studio");
+        }
+        frame(0);
+        host.classList.add("is-live");
+        return;
+      }
+
       // Draw now, well before arrival: this is the frame the visitor first sees.
+      // (Twice as the studio too, with and without depth of field, so every
+      // shader, the shadow map and the float target are warm before arrival.)
+      // Every state of the room is drawn once here, each in its own task:
+      // with depth of field and without (they are different programs), with
+      // the ball in the air and in the bin, and with the pictures in flight.
+      if (studio) {
+        const states: [dt: number, v: number, plain: boolean][] = [
+          [0, 0.3, false],
+          [0, 0.3, true],
+          [60, 0.45, false],
+          [60, 0.45, true],
+          [0, 0.66, true],
+          [0, 0.82, true],
+          [60, 0.02, false],
+        ];
+        for (const [dt, v, plain] of states) {
+          frame(dt, v, plain);
+          await pause();
+          if (disposed) return;
+        }
+      }
       frame(0);
       host.classList.add("is-live");
       cleanups.push(() => {
         corridorState.sheet = false;
       });
-      if (!moving) return;
 
       const onMove = (e: PointerEvent) => {
         if (e.pointerType === "touch") return;

@@ -628,6 +628,22 @@ html.anim .bridge-iris {
   height: 100%;
 }
 
+/* The "4" step is exactly the last screen of this chapter, because that
+   screen is the page the Corridor's entrance picks up and crumples. (It used
+   to be whatever lay in the bottom screen-height: on a shorter window that
+   cut off the "4", the heading and the top of the plate.) The plate gives up
+   width before it is ever cut. */
+html.anim .editorial {
+  padding-bottom: 0;
+}
+html.anim .ed-step:last-child {
+  box-sizing: border-box;
+  min-height: 100svh;
+}
+html.anim .ed-step:last-child .ed-figure {
+  width: min(100%, calc((100svh - 2 * clamp(28px, 5vw, 76px)) * 0.8));
+}
+
 /* ───────── 4: the corridor ───────── */
 
 .corridor {
@@ -639,7 +655,7 @@ html.anim .bridge-iris {
 /* The stage takes over one screen early, on top of Editorial's last screen,
    so the page that is on screen is the page that gets pulled in. */
 html.anim .corridor {
-  height: 560svh;
+  height: 660svh;
   margin-top: -100svh;
   /* Nothing of this chapter may sit on Editorial's last screen until its
      script has taken over: the first screen has no background, and the stage
@@ -651,6 +667,22 @@ html.anim .cor-stage:not(.is-set) {
 }
 html.anim .cor-stage:not(.is-set) > * {
   visibility: hidden;
+}
+/* Reduced motion: a still of the studio wall sits between the "4" screen and
+   the still tunnel. It is a picture taken from the same scene. */
+.studio-still {
+  display: none;
+}
+html:not(.anim) .corridor.has-studio .studio-still {
+  display: block;
+  height: 100svh;
+  background: #000;
+}
+.studio-still img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .cor-stage {
   position: relative;
@@ -1522,8 +1554,14 @@ main > .bridge {
   }
 
   /* ── Corridor: the frame fits the width ── */
+  html.anim .ed-step:last-child {
+    min-height: 100lvh;
+  }
+  html.anim .ed-step:last-child .ed-figure {
+    width: auto;
+  }
   html.anim .corridor {
-    height: 480svh;
+    height: 580svh;
     margin-top: -100lvh;
   }
   .cor-frame {

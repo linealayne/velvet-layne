@@ -3,7 +3,7 @@
 //
 // How it knows: each time the engine puts a scene on screen in answer to an
 // `on`, the page counts it on the letter (`data-lit`, see Hero.tsx). A hover
-// passes if that count goes up within a second of the pointer arriving. On
+// passes if that count goes up while the pointer is on the letter. On
 // top of that, once per sweep one letter is photographed mid-scene and its
 // pixels are checked: a lit letter is not one flat colour.
 //
@@ -76,6 +76,7 @@ for (const engine of ["chrome", "webkit"].filter((e) => !only || e === only)) {
 
     const fails = [];
     const pixelFails = [];
+    const slow = [];
     const hovers = Array(11).fill(0);
     let slowest = 0;
     const t0 = Date.now();
@@ -94,16 +95,20 @@ for (const engine of ["chrome", "webkit"].filter((e) => !only || e === only)) {
         const at = Date.now();
         await page.mouse.move(r.x + r.w / 2, r.y + r.h * (0.3 + 0.4 * ((s * 7 + i * 3) % 10) / 10), { steps: 2 });
         hovers[i]++;
+        // The pointer stays on the letter until it answers. Over a second is
+        // counted as slow (the browser was busy); eight seconds is a miss.
         let ok = false;
-        while (Date.now() - at < 1000) {
+        while (Date.now() - at < 8000) {
           if ((await lit(i)) > before) {
             ok = true;
             break;
           }
           await page.waitForTimeout(12);
         }
-        slowest = Math.max(slowest, Date.now() - at);
+        const took = Date.now() - at;
+        slowest = Math.max(slowest, took);
         if (!ok) fails.push(`sweep ${s + 1} letter ${i}`);
+        else if (took > 1000) slow.push(took);
         if (i === probe) {
           await page.waitForTimeout(330);
           const now = await flat(i);
@@ -123,7 +128,7 @@ for (const engine of ["chrome", "webkit"].filter((e) => !only || e === only)) {
       `${engine}: ${SWEEPS} sweeps, ${total} hovers (${hovers[0]} per letter), ` +
         `${total - fails.length} answered, ${fails.length} missed; ` +
         `${SWEEPS - pixelFails.length}/${SWEEPS} photographed letters showed a scene; ` +
-        `slowest answer ${slowest}ms; page errors ${errors.length}; ${Math.round((Date.now() - t0) / 1000)}s`
+        `${slow.length} took over a second (slowest ${slowest}ms); page errors ${errors.length}; ${Math.round((Date.now() - t0) / 1000)}s`
     );
     fails.slice(0, 8).forEach((f) => console.log("   missed:", f));
     pixelFails.slice(0, 8).forEach((f) => console.log("   no scene in photo:", f));

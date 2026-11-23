@@ -39,8 +39,17 @@ export type CaptureAsset = {
   listeners: (() => void)[];
 };
 
+/** The studio's photographs (Poly Haven, CC0; see scripts/studio-assets.mjs). */
+export type StudioSet = {
+  brick: [HTMLImageElement, HTMLImageElement, HTMLImageElement];
+  floor: [HTMLImageElement, HTMLImageElement, HTMLImageElement];
+  room: HTMLImageElement;
+};
+
 type Assets = {
   captures: CaptureAsset[];
+  /** Resolves with the studio's textures, decoded, or null if they could not be had. */
+  studio: Promise<StudioSet | null>;
   posters: HTMLCanvasElement[];
   /** Resolves when all posters exist. */
   postersDone: Promise<void>;
@@ -147,6 +156,30 @@ export function preloadCorridor(): Assets {
     }
   })();
 
-  assets = { captures, posters, postersDone };
+  // The studio's textures come down with the rest, decoded off the main
+  // thread, so the room is whole the first time it is seen. Phones take the
+  // half-size set.
+  const studio = (async (): Promise<StudioSet | null> => {
+    try {
+      const size = window.matchMedia("(max-width: 820px)").matches ? 512 : 1024;
+      const load = async (src: string) => {
+        const img = new Image();
+        img.decoding = "async";
+        img.src = src;
+        await img.decode();
+        return img;
+      };
+      const names = ["brick-color", "brick-normal", "brick-arm", "floor-color", "floor-normal", "floor-arm"];
+      const [a, b, c, d, e, f, room] = await Promise.all([
+        ...names.map((n) => load(`/studio/${n}-${size}.webp`)),
+        load("/studio/room.webp"),
+      ]);
+      return { brick: [a, b, c], floor: [d, e, f], room };
+    } catch {
+      return null;
+    }
+  })();
+
+  assets = { captures, studio, posters, postersDone };
   return assets;
 }
