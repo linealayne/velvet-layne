@@ -7,7 +7,7 @@
  * scene drawing off the main thread) and on the main thread as a fallback for
  * browsers that cannot transfer a canvas.
  */
-import { LETTER_SCENES, setLite, warmChrome, type Ctx, type Scene } from "./scenes";
+import { LETTER_SCENES, warmShader, type Ctx, type Scene } from "./scenes";
 
 const BONE = "#efe4d0";
 const WIPE = 0.25; // seconds for the diagonal slice
@@ -16,7 +16,7 @@ const HOLD = 500; // ms a scene lingers after release
 export type EngineOptions = {
   /** false = reduced motion: one still frame, no wipe, no loop. */
   moving: boolean;
-  /** Touch device: 2D chrome, and scenes repaint on every other frame. */
+  /** Touch device: steady scenes repaint on every other frame. */
   coarse: boolean;
 };
 
@@ -38,6 +38,7 @@ type Letter = {
   h: number;
   dpr: number;
   wanted: boolean;
+  waiting: boolean;
 };
 
 const frame: (fn: (t: number) => void) => number =
@@ -48,7 +49,6 @@ const frame: (fn: (t: number) => void) => number =
 export function createEngine(options: EngineOptions, onIdle: (i: number) => void) {
   const { moving, coarse } = options;
   const letters: (Letter | undefined)[] = [];
-  setLite(coarse);
   let running = false;
   let last = 0;
   let odd = false;
@@ -153,6 +153,7 @@ export function createEngine(options: EngineOptions, onIdle: (i: number) => void
         h: 0,
         dpr: 1,
         wanted: false,
+        waiting: false,
       };
     },
     size(i: number, w: number, h: number, dpr: number) {
@@ -171,6 +172,21 @@ export function createEngine(options: EngineOptions, onIdle: (i: number) => void
       L.wanted = true;
       if (L.phase === 3) L.phase = 2;
       if (L.phase !== 0) return;
+      // The scene's shader may still be compiling. Wait for it: a letter must
+      // show one scene for its whole activation, never a stand-in first.
+      if (L.scene.ready && !L.scene.ready()) {
+        if (!L.waiting) {
+          L.waiting = true;
+          const poll = () => {
+            if (!L.wanted) return void (L.waiting = false);
+            if (L.scene.ready && !L.scene.ready()) return void setTimeout(poll, 40);
+            L.waiting = false;
+            this.on(i);
+          };
+          setTimeout(poll, 40);
+        }
+        return;
+      }
       const now = performance.now();
       if (!L.t0) L.t0 = now;
       if (!moving) {
@@ -204,7 +220,7 @@ export function createEngine(options: EngineOptions, onIdle: (i: number) => void
     },
     /** Compile the chrome shader ahead of the first hover. */
     warm() {
-      if (!coarse) warmChrome();
+      warmShader();
     },
   };
 }

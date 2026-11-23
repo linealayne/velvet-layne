@@ -8,12 +8,16 @@
  * context no matter how many letters are lit.
  */
 
+import { LETTER_FRAG } from "./letterShader";
+
 /** Scenes draw to a normal canvas or, inside the letter worker, an offscreen one. */
 export type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 export type Sheet = HTMLCanvasElement | OffscreenCanvas;
 
 export type Scene = {
   draw: (ctx: Ctx, w: number, h: number, t: number) => void;
+  /** False while the scene cannot draw its real self yet. Absent means always ready. */
+  ready?: () => boolean;
   /** A flattering moment to freeze on for reduced motion and for stills. */
   still: number;
 };
@@ -561,52 +565,7 @@ function blocks(): Scene {
   };
 }
 
-/* ───────── L and Y: liquid chrome, one shared WebGL program ───────── */
-
-const CHROME_FRAG = `
-precision highp float;
-uniform vec2 uRes;
-uniform float uTime;
-uniform float uKind;
-float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
-float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
-  return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);}
-float fbm(vec2 p){float a=.5,v=0.;for(int i=0;i<4;i++){v+=a*noise(p);p=mat2(1.6,1.2,-1.2,1.6)*p;a*=.5;}return v;}
-float height(vec2 p){
-  if(uKind<.5){
-    // pour: long ropes of metal running down the letter
-    vec2 q=vec2(p.x*2.3,p.y*.3+uTime*.95);
-    float w=fbm(q*.7+vec2(0.,uTime*.3));
-    return fbm(q+vec2(w*1.7,0.));
-  }
-  // surface: a slow rolling swell
-  vec2 q=p*1.25+vec2(uTime*.12,-uTime*.08);
-  float w=fbm(q*1.1-uTime*.15);
-  return fbm(q+w*1.6);
-}
-// A studio to reflect: bright banded sky, dark cap, orange horizon, oxblood floor.
-vec3 studio(vec3 r){
-  float y=r.y,x=r.x;
-  vec3 c=vec3(.02,.016,.018);
-  c=mix(c,vec3(.96,.94,.9),smoothstep(.04,.45,y)*(.5+.5*sin(y*10.+x*3.)));
-  c=mix(c,vec3(.03,.02,.02),smoothstep(.74,.92,y));
-  c+=vec3(1.,.3,.02)*exp(-pow((y+.03)*6.5,2.))*(uKind<.5?1.5:1.05);
-  c+=vec3(.64,.0,.08)*smoothstep(-.12,-.8,y);
-  c+=vec3(.8,.84,.9)*exp(-pow((x-.5)*5.,2.))*.45*smoothstep(-.4,.1,y);
-  return c;
-}
-void main(){
-  vec2 p=(gl_FragCoord.xy-.5*uRes)/min(uRes.x,uRes.y);
-  float e=.02;
-  float k=uKind<.5?1.5:2.1;
-  float h0=height(p);
-  vec3 n=normalize(vec3((height(p-vec2(e,0.))-height(p+vec2(e,0.)))/e*k*.5,
-                        (height(p-vec2(0.,e))-height(p+vec2(0.,e)))/e*k*.5,1.));
-  vec3 r=reflect(vec3(0.,0.,-1.),n);
-  vec3 col=studio(r)*(.75+.5*h0);
-  col+=pow(1.-n.z,2.)*vec3(.5,.45,.4);
-  gl_FragColor=vec4(col,1.);
-}`;
+/* ───────── The live scenes: one shared WebGL program for all eleven ───────── */
 
 type Shared = {
   canvas: Sheet;
@@ -618,12 +577,14 @@ type Shared = {
 };
 let shared: Shared | null = null;
 let sharedTried = false;
+/** The shared canvas never resizes: each letter renders into a corner of it. */
+const SIDE = 304;
 
-/** Start compiling the chrome shader. Safe to call early; never blocks. */
-export function warmChrome() {
+/** Start compiling the letter shader. Safe to call early; never blocks. */
+export function warmShader() {
   if (sharedTried) return;
   sharedTried = true;
-  const canvas = sheet(2, 2);
+  const canvas = sheet(SIDE, SIDE);
   const gl = canvas.getContext("webgl", {
     antialias: false,
     alpha: false,
@@ -631,21 +592,23 @@ export function warmChrome() {
   }) as WebGLRenderingContext | null;
   if (!gl) return;
   const make = (type: number, src: string) => {
-    const s = gl.createShader(type)!;
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    return s;
+    const sh = gl.createShader(type)!;
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    return sh;
   };
   const prog = gl.createProgram()!;
   gl.attachShader(prog, make(gl.VERTEX_SHADER, "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}"));
-  gl.attachShader(prog, make(gl.FRAGMENT_SHADER, CHROME_FRAG));
+  gl.attachShader(prog, make(gl.FRAGMENT_SHADER, LETTER_FRAG));
   gl.linkProgram(prog);
   const state: Shared = { canvas, gl, prog, ready: false, failed: false, u: {} };
   shared = state;
   const parallel = gl.getExtension("KHR_parallel_shader_compile");
+  const next: (fn: () => void) => void =
+    typeof requestAnimationFrame === "function" ? (fn) => requestAnimationFrame(fn) : (fn) => setTimeout(fn, 16);
   const wait = () => {
     if (parallel && !gl.getProgramParameter(prog, parallel.COMPLETION_STATUS_KHR)) {
-      requestAnimationFrame(wait);
+      next(wait);
       return;
     }
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
@@ -661,104 +624,127 @@ export function warmChrome() {
     for (const name of ["uRes", "uTime", "uKind"]) state.u[name] = gl.getUniformLocation(prog, name);
     state.ready = true;
   };
-  wait();
+  // Give the compile a beat before the first status check.
+  next(wait);
 }
 
 /**
- * Phones do not get a second WebGL context for two letters. With `lite` on,
- * the chrome scenes are drawn in 2D instead: a reflection strip slid through
- * a sine, a few dozen blits per frame.
+ * A letter's scene. It is drawn by the shared shader; `plain` is the 2D
+ * version, used only where WebGL is not available at all.
+ *
+ * Which of the two a letter uses is decided ONCE, the first time it draws,
+ * and never changes. `ready()` is false while the shader is still compiling,
+ * and the engine does not start a letter until it is true. (Before this, a
+ * letter drew a 2D stand-in until the shader was ready and then swapped to
+ * the real scene mid-activation: that was the "L starts as one scene and
+ * switches" glitch.)
  */
-let lite = false;
-export function setLite(on: boolean) {
-  lite = on;
-}
-
-function ribbons(kind: 0 | 1): Scene["draw"] {
-  let strip: Sheet | null = null;
-  return (ctx, w, h, t) => {
-    if (!strip) {
-      // One tall strip of studio reflections, twice over so it can wrap.
-      strip = cached(4, 512, (c) => {
-        const g = c.createLinearGradient(0, 0, 0, 256);
-        const stops: [number, string][] = [
-          [0, "#0b0909"],
-          [0.1, "#fff6ea"],
-          [0.2, CHROME],
-          [0.3, "#141011"],
-          [0.44, SIGNAL],
-          [0.5, "#ffd9a8"],
-          [0.58, MOLTEN],
-          [0.7, "#0b0909"],
-          [0.84, CHROME],
-          [0.93, "#2a2224"],
-          [1, "#0b0909"],
-        ];
-        stops.forEach(([o, col]) => g.addColorStop(o, col));
-        c.fillStyle = g;
-        c.fillRect(0, 0, 4, 256);
-        c.drawImage(c.canvas, 0, 0, 4, 256, 0, 256, 4, 256);
-      });
-    }
-    const bands = Math.max(8, Math.round(w / 7));
-    const bw = w / bands;
-    const span = kind ? 150 : 110;
-    for (let i = 0; i < bands; i++) {
-      const u = i / bands;
-      const wave = kind
-        ? Math.sin(u * 5 + t * 0.9) * 46 + Math.sin(u * 11 - t * 1.4) * 18 + t * 12
-        : Math.sin(u * 9 + t * 0.6) * 30 + Math.sin(u * 21 + i) * 14 - t * 90;
-      const sy = ((wave % 256) + 256) % 256;
-      ctx.drawImage(strip, 0, sy, 4, span, i * bw, 0, bw + 0.6, h);
-    }
-  };
-}
-
-function chrome(kind: 0 | 1): Scene {
-  const flat = ribbons(kind);
+function live(kind: number, still: number, plain: Scene): Scene {
+  let mode: "gl" | "2d" | null = null;
   return {
-    still: 2.5,
+    still,
+    ready() {
+      warmShader();
+      return !shared || shared.failed || shared.ready;
+    },
     draw(ctx, w, h, t) {
-      if (lite) return flat(ctx, w, h, t);
-      warmChrome();
+      if (!mode) mode = shared && shared.ready ? "gl" : "2d";
       const s = shared;
-      // Until the shader is ready (or if WebGL is missing): the 2D version.
-      if (!s || !s.ready) return flat(ctx, w, h, t);
+      if (mode === "2d" || !s) return plain.draw(ctx, w, h, t);
       const scale = Math.min(1, 300 / Math.max(w, h));
       const cw = Math.max(2, Math.round(w * scale));
       const ch = Math.max(2, Math.round(h * scale));
-      if (s.canvas.width !== cw || s.canvas.height !== ch) {
-        s.canvas.width = cw;
-        s.canvas.height = ch;
-      }
       const gl = s.gl;
       gl.viewport(0, 0, cw, ch);
       gl.uniform2f(s.u.uRes, cw, ch);
       gl.uniform1f(s.u.uTime, t);
       gl.uniform1f(s.u.uKind, kind);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      ctx.drawImage(s.canvas, 0, 0, w, h);
+      // The viewport's origin is the bottom-left corner of the canvas.
+      ctx.drawImage(s.canvas, 0, SIDE - ch, cw, ch, 0, 0, w, h);
     },
   };
 }
 
-/** One factory per hero letter, in reading order: V E L V E T / L A Y N E. */
-export const LETTER_SCENES: { name: string; make: () => Scene }[] = [
-  { name: "vinyl", make: vinyl },
-  { name: "print", make: print },
-  { name: "pour", make: () => chrome(0) },
-  { name: "vhs", make: vhs },
-  { name: "threads", make: threads },
-  { name: "tunnel", make: tunnel },
-  { name: "sparks", make: sparks },
-  { name: "galaxy", make: galaxy },
-  { name: "chrome", make: () => chrome(1) },
-  { name: "neon", make: neon },
-  { name: "blocks", make: blocks },
+/** The 2D stand-in for the two chrome scenes: a reflection strip slid through a sine. */
+function ribbons(kind: 0 | 1): Scene {
+  let strip: Sheet | null = null;
+  return {
+    still: 2.5,
+    draw(ctx, w, h, t) {
+      if (!strip) {
+        strip = cached(4, 512, (c) => {
+          const g = c.createLinearGradient(0, 0, 0, 256);
+          const stops: [number, string][] = [
+            [0, "#0b0909"],
+            [0.1, "#fff6ea"],
+            [0.2, CHROME],
+            [0.3, "#141011"],
+            [0.44, SIGNAL],
+            [0.5, "#ffd9a8"],
+            [0.58, MOLTEN],
+            [0.7, "#0b0909"],
+            [0.84, CHROME],
+            [0.93, "#2a2224"],
+            [1, "#0b0909"],
+          ];
+          stops.forEach(([o, col]) => g.addColorStop(o, col));
+          c.fillStyle = g;
+          c.fillRect(0, 0, 4, 256);
+          c.drawImage(c.canvas, 0, 0, 4, 256, 0, 256, 4, 256);
+        });
+      }
+      const bands = Math.max(8, Math.round(w / 7));
+      const bw = w / bands;
+      const span = kind ? 150 : 110;
+      for (let i = 0; i < bands; i++) {
+        const u = i / bands;
+        const wave = kind
+          ? Math.sin(u * 5 + t * 0.9) * 46 + Math.sin(u * 11 - t * 1.4) * 18 + t * 12
+          : Math.sin(u * 9 + t * 0.6) * 30 + Math.sin(u * 21 + i) * 14 - t * 90;
+        const sy = ((wave % 256) + 256) % 256;
+        ctx.drawImage(strip, 0, sy, 4, span, i * bw, 0, bw + 0.6, h);
+      }
+    },
+  };
+}
+
+// The 2D drawings, in letter order. They are the no-WebGL stand-ins, and the
+// finale's tiles are still frames of them.
+const PLAIN: (() => Scene)[] = [
+  vinyl,
+  print,
+  () => ribbons(0),
+  vhs,
+  threads,
+  tunnel,
+  sparks,
+  galaxy,
+  () => ribbons(1),
+  neon,
+  blocks,
 ];
 
-/** A still frame of a scene, used for the finale tiles. 2D scenes only. */
+/** One scene per hero letter, in reading order: V E L V E T / L A Y N E. */
+export const LETTER_SCENES: { name: string; make: () => Scene }[] = [
+  ["vinyl", 1.3],
+  ["marble", 3],
+  ["pour", 2.5],
+  ["mercury", 2.2],
+  ["velvet", 2],
+  ["corridor", 0.7],
+  ["molten", 1.2],
+  ["nebula", 4],
+  ["chrome", 2.5],
+  ["neon", 3],
+  ["blocks", 2.3],
+].map(([name, still], kind) => ({
+  name: name as string,
+  make: () => live(kind, still as number, PLAIN[kind]()),
+}));
+
+/** A still frame of a letter's 2D drawing, used for the finale tiles. */
 export function sceneStill(index: number, w: number, h: number) {
-  const scene = LETTER_SCENES[index].make();
+  const scene = PLAIN[index]();
   return cached(w, h, (c) => scene.draw(c, w, h, scene.still));
 }

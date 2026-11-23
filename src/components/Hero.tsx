@@ -241,16 +241,14 @@ export default function Hero() {
       ro.observe(el.querySelector(".name")!);
       cleanups.push(() => ro.disconnect());
 
-      // With a mouse: start the worker and compile the chrome shader ahead of
-      // the first hover, once the page has settled.
-      if (!coarse) {
-        const warm = window.setTimeout(async () => {
-          const pending = boot();
-          if (pending) await pending;
-          send({ type: "warm" });
-        }, 2200);
-        cleanups.push(() => window.clearTimeout(warm));
-      }
+      // Start the engine and compile the letter shader ahead of the first
+      // letter, once the page has settled.
+      const warm = window.setTimeout(async () => {
+        const pending = boot();
+        if (pending) await pending;
+        send({ type: "warm" });
+      }, 2000);
+      cleanups.push(() => window.clearTimeout(warm));
 
       // Touch screens have no hover, so the letters take turns on their own.
       if (coarse && moving) {
