@@ -32,7 +32,8 @@ export const CAPTURE_W = 800;
 export const CAPTURE_H = 500;
 
 export type CaptureAsset = {
-  canvas: HTMLCanvasElement;
+  /** Created on first use, so warming the assets at idle does no canvas work. */
+  canvas: () => HTMLCanvasElement;
   ready: boolean;
   /** Called when the real image has been drawn into `canvas`. */
   listeners: (() => void)[];
@@ -77,16 +78,23 @@ function placeholder(c: HTMLCanvasElement, name: string, color: string, ink: str
   frame(g);
 }
 
-async function loadCapture(asset: CaptureAsset, file: string) {
+type Slot = CaptureAsset & { made?: HTMLCanvasElement; img?: HTMLImageElement };
+
+function paintImage(c: HTMLCanvasElement, img: HTMLImageElement) {
+  const g = c.getContext("2d")!;
+  g.drawImage(img, 0, 0, CAPTURE_W, CAPTURE_H);
+  frame(g);
+}
+
+async function loadCapture(asset: Slot, file: string) {
   try {
     const img = new Image();
     img.decoding = "async";
     img.src = `/work/${file}.webp`;
     // decode() resolves once the pixels are ready, so drawing it cannot stall.
     await img.decode();
-    const g = asset.canvas.getContext("2d")!;
-    g.drawImage(img, 0, 0, CAPTURE_W, CAPTURE_H);
-    frame(g);
+    asset.img = img;
+    if (asset.made) paintImage(asset.made, img);
     asset.ready = true;
     asset.listeners.forEach((fn) => fn());
   } catch {
@@ -96,12 +104,22 @@ async function loadCapture(asset: CaptureAsset, file: string) {
 
 export function preloadCorridor(): Assets {
   if (assets) return assets;
-  const captures: CaptureAsset[] = CAPTURES.map(([, name, color, ink]) => {
-    const canvas = document.createElement("canvas");
-    canvas.width = CAPTURE_W;
-    canvas.height = CAPTURE_H;
-    placeholder(canvas, name, color, ink);
-    return { canvas, ready: false, listeners: [] };
+  const captures: Slot[] = CAPTURES.map(([, name, color, ink]) => {
+    const slot: Slot = {
+      ready: false,
+      listeners: [],
+      canvas: () => {
+        if (slot.made) return slot.made;
+        const canvas = document.createElement("canvas");
+        canvas.width = CAPTURE_W;
+        canvas.height = CAPTURE_H;
+        if (slot.img) paintImage(canvas, slot.img);
+        else placeholder(canvas, name, color, ink);
+        slot.made = canvas;
+        return canvas;
+      },
+    };
+    return slot;
   });
 
   // Two at a time, in the order the tunnel will use them.
@@ -120,11 +138,12 @@ export function preloadCorridor(): Assets {
     await postersReady();
     // The display font is certainly loaded now: repaint any placeholder still showing.
     captures.forEach((c, i) => {
-      if (!c.ready) placeholder(c.canvas, CAPTURES[i][1], CAPTURES[i][2], CAPTURES[i][3]);
+      if (!c.ready && c.made) placeholder(c.made, CAPTURES[i][1], CAPTURES[i][2], CAPTURES[i][3]);
     });
+    // One poster per idle slice.
     for (let i = 0; i < POSTER_COUNT; i++) {
+      await idle();
       posters.push(makePoster(i));
-      if (i % 2 === 1) await idle();
     }
   })();
 

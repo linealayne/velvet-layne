@@ -28,14 +28,11 @@ export default function Corridor() {
   const [near, setNear] = useState(false);
 
   useEffect(() => {
-    // 1. Assets: when the browser is idle after the hero, or on first input.
+    // 1. Assets are warmed from SmoothScroll.tsx once the hero has settled
+    //    (this component is not hydrated until the visitor's first input).
     const warm = () => {
       preloadCorridor();
     };
-    const timer = window.setTimeout(() => {
-      if ("requestIdleCallback" in window) window.requestIdleCallback(warm, { timeout: 1500 });
-      else warm();
-    }, 2600);
 
     // 2. Scene: at the first real scroll, or when the chapter is a few
     //    screens away, whichever comes first.
@@ -62,7 +59,6 @@ export default function Corridor() {
     io.observe(root.current!);
     onScroll();
     return () => {
-      window.clearTimeout(timer);
       window.removeEventListener("scroll", onScroll);
       io?.disconnect();
     };

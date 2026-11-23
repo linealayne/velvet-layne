@@ -7,6 +7,7 @@ import { VELVET, LAYNE, type Glyph } from "@/lib/glyphs";
 import { LETTER_SCENES } from "@/lib/scenes";
 import type { Engine, EngineOptions } from "@/lib/letterEngine";
 import type { FromWorker, ToWorker } from "@/lib/letters.worker";
+import { firstInput } from "@/lib/gate";
 
 const ALL: Glyph[] = [...VELVET, ...LAYNE];
 
@@ -274,8 +275,14 @@ export default function Hero() {
         });
       }
 
-      /* ── Scroll: curtain, bloom, hue swing, cool-down ── */
-      if (moving) {
+      /* ── Scroll: curtain, bloom, hue swing, cool-down ──
+         Built at the visitor's first input, not at load. */
+      let gone = false;
+      cleanups.push(() => {
+        gone = true;
+      });
+      const scrollSetup = () => {
+        if (gone || !moving) return;
         gsap
           .timeline({
             defaults: { ease: "none" },
@@ -309,7 +316,8 @@ export default function Hero() {
         };
         window.addEventListener("pointermove", onMove, { passive: true });
         cleanups.push(() => window.removeEventListener("pointermove", onMove));
-      }
+      };
+      firstInput.then(scrollSetup);
 
       return () => {
         cleanups.forEach((fn) => fn());

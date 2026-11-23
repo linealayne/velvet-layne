@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import SmoothScroll from "@/components/SmoothScroll";
+import AfterInput from "@/components/AfterInput";
 import Hero from "@/components/Hero";
 import Manifesto from "@/components/Manifesto";
 import Bridge from "@/components/Bridge";
@@ -10,9 +11,9 @@ import Brutal from "@/components/Brutal";
 import Finale from "@/components/Finale";
 import Footer from "@/components/Footer";
 
-// Nothing below suspends. Each boundary exists so React hydrates that chapter
-// in its own interruptible pass instead of hydrating the whole page in one
-// long task. The HTML is already complete from the server either way.
+// The HTML is complete from the server. Each boundary lets React hydrate that
+// chapter in its own interruptible pass, and <AfterInput> holds every chapter
+// below the hero back until the visitor's first scroll, touch or key press.
 export default function Home() {
   return (
     <>
@@ -22,30 +23,44 @@ export default function Home() {
           <Hero />
         </Suspense>
         <Suspense>
-          <Manifesto />
-          <Bridge variant="columns" />
+          <AfterInput>
+            <Manifesto />
+            <Bridge variant="columns" />
+          </AfterInput>
         </Suspense>
         <Suspense>
-          <Editorial />
+          <AfterInput>
+            <Editorial />
+          </AfterInput>
         </Suspense>
         <Suspense>
-          <Corridor />
-          <Bridge variant="iris" />
+          <AfterInput>
+            <Corridor />
+            <Bridge variant="iris" />
+          </AfterInput>
         </Suspense>
         <Suspense>
-          <Dimension />
-          <Bridge variant="tiles" />
+          <AfterInput>
+            <Dimension />
+            <Bridge variant="tiles" />
+          </AfterInput>
         </Suspense>
         <Suspense>
-          <Brutal />
-          <Bridge variant="hinge" />
+          <AfterInput>
+            <Brutal />
+            <Bridge variant="hinge" />
+          </AfterInput>
         </Suspense>
         <Suspense>
-          <Finale />
+          <AfterInput>
+            <Finale />
+          </AfterInput>
         </Suspense>
       </main>
       <Suspense>
-        <Footer />
+        <AfterInput>
+          <Footer />
+        </AfterInput>
       </Suspense>
       {/* One sheet of film grain over the whole show. */}
       <div className="film-grain" aria-hidden="true" />

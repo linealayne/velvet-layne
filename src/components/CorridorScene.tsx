@@ -101,7 +101,7 @@ export default function CorridorScene() {
       };
       const port = assets.posters.map(material);
       const land = assets.captures.map((asset) => {
-        const mat = material(asset.canvas);
+        const mat = material(asset.canvas());
         if (!asset.ready) {
           // The real image replaces the placeholder with a quick fade up.
           asset.listeners.push(() => {
