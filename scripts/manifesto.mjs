@@ -19,14 +19,14 @@ for (let i = 0; i < 3; i++) {
   await page.waitForTimeout(400);
 }
 await page.waitForTimeout(1500);
-await page.screenshot({ path: `${out}/manifesto-1440-drift-1.png` });
+await page.screenshot({ path: `${out}/manifesto-1440-drift-1.jpg`, type: "jpeg", quality: 88 });
 await page.waitForTimeout(4000);
-await page.screenshot({ path: `${out}/manifesto-1440-drift-2.png` });
+await page.screenshot({ path: `${out}/manifesto-1440-drift-2.jpg`, type: "jpeg", quality: 88 });
 // Sweep the cursor through and catch the threads parting around it.
 for (let i = 0; i <= 40; i++) {
   await page.mouse.move(300 + i * 16, 620 - i * 6);
   await page.waitForTimeout(24);
 }
 await page.waitForTimeout(250);
-await page.screenshot({ path: `${out}/manifesto-1440-cursor.png` });
+await page.screenshot({ path: `${out}/manifesto-1440-cursor.jpg`, type: "jpeg", quality: 88 });
 await browser.close();

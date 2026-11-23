@@ -50,7 +50,7 @@ for (const run of [
     await page.waitForTimeout(30);
   }
   const arrived = ((Date.now() - t0) / 1000).toFixed(1);
-  const shot = (name) => page.screenshot({ path: `${out}/cold-${run.tag}-${name}.png` });
+  const shot = (name) => page.screenshot({ path: `${out}/cold-${run.tag}-${name}.jpg`, type: "jpeg", quality: 85 });
   await shot("1-entering");
   while ((await top()) > -run.height * 0.45) {
     await scrollBy(80);
