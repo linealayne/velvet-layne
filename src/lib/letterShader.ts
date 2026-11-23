@@ -1,18 +1,24 @@
 /**
- * One fragment shader for all eleven hero letter scenes. `uKind` is the
- * letter's index (V E L V E T / L A Y N E = 0..10). Every scene is a glossy,
- * liquid material in the show's palette: oxblood, chrome, signal orange, black.
+ * The fragment shader source for the eleven hero letter scenes. `K(n.)` marks
+ * the code for letter n (V E L V E T / L A Y N E = 0..10). Every scene is a
+ * glossy, liquid material in the show's palette: oxblood, chrome, signal
+ * orange, black.
  *
- * Kinds 2 (the pour) and 8 (the Y) are the two original chrome scenes and
- * their code paths are unchanged. Do not retune kind 8: the Y is the reference
- * the others were built to match.
+ * `letterFrag(kind)` turns this into the shader for ONE letter by replacing
+ * every `K(n.)` with a literal true or false, so the compiler throws the other
+ * ten scenes away. That matters: compiled as a single program with the letter
+ * chosen by a uniform, this took over 100 seconds to link (the driver
+ * flattens every branch). As eleven constant-folded programs, each links in
+ * well under half a second.
+ *
+ * Letters 2 (the pour) and 8 (the Y) are the two original chrome scenes and
+ * their code is unchanged. Do not retune 8: the Y is the reference the others
+ * were built to match.
  */
-export const LETTER_FRAG = `
+const SOURCE = `
 precision highp float;
 uniform vec2 uRes;
 uniform float uTime;
-uniform float uKind;
-#define K(a) (abs(uKind-(a))<.5)
 
 const vec3 OX=vec3(.36,.035,.075);
 const vec3 MOLT=vec3(.77,.0,.11);
@@ -54,7 +60,7 @@ float height(vec2 p){
   }
   if(K(4.)){
     // crushed velvet: tight, blotchy creases
-    vec2 q=p*2.6+vec2(uTime*.02,-uTime*.015);
+    vec2 q=p*1.9+vec2(uTime*.02,-uTime*.015);
     return fbm(q+fbm(q*1.9)*1.3);
   }
   if(K(7.)){
@@ -154,9 +160,9 @@ void main(){
     float h0=height(p);
     vec3 n=normalAt(p,2.);
     vec3 r=reflect(vec3(0.,0.,-1.),n);
-    float m=smoothstep(.38,.62,sin(h0*15.+uTime*.3)*.5+.5);
+    float m=smoothstep(.3,.56,sin(h0*15.+uTime*.3)*.5+.5);
     vec3 chrome=studio(r)*(.75+.5*h0);
-    vec3 lacquer=OX*(.5+1.1*h0)+MOLT*.22+studio(r)*.3;
+    vec3 lacquer=OX*(.3+.75*h0)+MOLT*.06+studio(r)*.2;
     col=mix(lacquer,chrome,m);
     col+=pow(1.-n.z,2.)*vec3(.5,.45,.4)*.8;
 
@@ -166,8 +172,9 @@ void main(){
     vec3 n=normalAt(p,2.6);
     vec3 r=reflect(vec3(0.,0.,-1.),n);
     vec3 s=studio(r);
-    col=mix(vec3(dot(s,vec3(.34))),s,.25)*(.8+.4*h0);
-    col+=MOLT*(.6*smoothstep(-.5,.7,r.x*.8+r.y*.6)+.12);
+    col=mix(vec3(dot(s,vec3(.34))),s,.2)*(.8+.4*h0);
+    col+=MOLT*.5*smoothstep(.1,.8,r.x*.8+r.y*.6);
+    col*=vec3(.96,.97,1.);
     col+=pow(1.-n.z,2.)*vec3(.6,.5,.5);
 
   }else if(K(4.)){
@@ -193,8 +200,8 @@ void main(){
     float zz=z*.9+uTime*2.1;
     vec2 f=vec2(fract(zz),fract(across*1.5+.5));
     float id=hash(vec2(floor(zz),floor(across*1.5+.5)+face));
-    float panel=step(.1,f.x)*step(f.x,.9)*step(.08,f.y)*step(f.y,.92)*step(.22,id);
-    vec3 pc=id<.48?BONE:id<.66?SIG:id<.84?MOLT:CHR;
+    float panel=step(.1,f.x)*step(f.x,.9)*step(.08,f.y)*step(f.y,.92)*step(.36,id);
+    vec3 pc=id<.56?BONE:id<.72?SIG:id<.88?MOLT:CHR;
     float light=smoothstep(11.,1.1,z);
     col=pc*panel*light;
     // gloss: a hard highlight running down each panel, and the wet floor
@@ -209,7 +216,7 @@ void main(){
     vec2 q=p*1.5+vec2(uTime*.04,-uTime*.07);
     float w=fbm(q+uTime*.11);
     float h0=fbm(q*1.3+w*2.1);
-    float heat=smoothstep(.22,.82,h0);
+    float heat=smoothstep(.12,.68,h0);
     col=mix(vec3(.03,.0,.0),MOLT,smoothstep(0.,.3,heat));
     col=mix(col,SIG,smoothstep(.28,.62,heat));
     col=mix(col,vec3(1.,.96,.82),smoothstep(.66,1.,heat));
@@ -288,3 +295,10 @@ void main(){
   }
   gl_FragColor=vec4(col,1.);
 }`;
+
+export const LETTER_KINDS = 11;
+
+/** The complete fragment shader for one letter. */
+export function letterFrag(kind: number) {
+  return SOURCE.replace(/K\((\d+)\.\)/g, (_, n) => (Number(n) === kind ? "true" : "false"));
+}

@@ -8,7 +8,7 @@
  * context no matter how many letters are lit.
  */
 
-import { LETTER_FRAG } from "./letterShader";
+import { letterFrag, LETTER_KINDS } from "./letterShader";
 
 /** Scenes draw to a normal canvas or, inside the letter worker, an offscreen one. */
 export type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -565,32 +565,46 @@ function blocks(): Scene {
   };
 }
 
-/* ───────── The live scenes: one shared WebGL program for all eleven ───────── */
+/* ───────── The live scenes: one shared WebGL context, one small program per letter ───────── */
 
-type Shared = {
-  canvas: Sheet;
-  gl: WebGLRenderingContext;
+type Program = {
   prog: WebGLProgram;
   ready: boolean;
   failed: boolean;
-  u: Record<string, WebGLUniformLocation | null>;
+  uRes: WebGLUniformLocation | null;
+  uTime: WebGLUniformLocation | null;
 };
-let shared: Shared | null = null;
-let sharedTried = false;
+type Shared = { canvas: Sheet; gl: WebGLRenderingContext; progs: (Program | undefined)[] };
+/** null once we know there is no WebGL here. */
+let shared: Shared | null | undefined;
 /** The shared canvas never resizes: each letter renders into a corner of it. */
 const SIDE = 304;
 
-/** Start compiling the letter shader. Safe to call early; never blocks. */
-export function warmShader() {
-  if (sharedTried) return;
-  sharedTried = true;
+const next: (fn: () => void) => void =
+  typeof requestAnimationFrame === "function" ? (fn) => requestAnimationFrame(fn) : (fn) => setTimeout(fn, 16);
+
+function context() {
+  if (shared !== undefined) return shared;
   const canvas = sheet(SIDE, SIDE);
   const gl = canvas.getContext("webgl", {
     antialias: false,
     alpha: false,
     preserveDrawingBuffer: true,
   }) as WebGLRenderingContext | null;
-  if (!gl) return;
+  if (!gl) return (shared = null);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  return (shared = { canvas, gl, progs: [] });
+}
+
+/** Start compiling one letter's program. Never blocks; `done` fires either way. */
+function compile(kind: number, done?: () => void) {
+  const s = context();
+  if (!s) return done?.();
+  if (s.progs[kind]) return done?.();
+  const gl = s.gl;
   const make = (type: number, src: string) => {
     const sh = gl.createShader(type)!;
     gl.shaderSource(sh, src);
@@ -599,66 +613,75 @@ export function warmShader() {
   };
   const prog = gl.createProgram()!;
   gl.attachShader(prog, make(gl.VERTEX_SHADER, "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}"));
-  gl.attachShader(prog, make(gl.FRAGMENT_SHADER, LETTER_FRAG));
+  gl.attachShader(prog, make(gl.FRAGMENT_SHADER, letterFrag(kind)));
+  gl.bindAttribLocation(prog, 0, "p");
   gl.linkProgram(prog);
-  const state: Shared = { canvas, gl, prog, ready: false, failed: false, u: {} };
-  shared = state;
+  const entry: Program = { prog, ready: false, failed: false, uRes: null, uTime: null };
+  s.progs[kind] = entry;
   const parallel = gl.getExtension("KHR_parallel_shader_compile");
-  const next: (fn: () => void) => void =
-    typeof requestAnimationFrame === "function" ? (fn) => requestAnimationFrame(fn) : (fn) => setTimeout(fn, 16);
   const wait = () => {
-    if (parallel && !gl.getProgramParameter(prog, parallel.COMPLETION_STATUS_KHR)) {
-      next(wait);
-      return;
-    }
+    if (parallel && !gl.getProgramParameter(prog, parallel.COMPLETION_STATUS_KHR)) return next(wait);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      state.failed = true;
-      return;
+      entry.failed = true;
+    } else {
+      entry.uRes = gl.getUniformLocation(prog, "uRes");
+      entry.uTime = gl.getUniformLocation(prog, "uTime");
+      entry.ready = true;
     }
-    gl.useProgram(prog);
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog, "p");
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    for (const name of ["uRes", "uTime", "uKind"]) state.u[name] = gl.getUniformLocation(prog, name);
-    state.ready = true;
+    done?.();
   };
   // Give the compile a beat before the first status check.
   next(wait);
 }
 
 /**
- * A letter's scene. It is drawn by the shared shader; `plain` is the 2D
- * version, used only where WebGL is not available at all.
+ * Compile every letter's program, one after another, in the background.
+ * Called once the page has settled so the first hover finds its scene ready.
+ */
+export function warmShader() {
+  let kind = 0;
+  const step = () => {
+    if (kind >= LETTER_KINDS) return;
+    compile(kind++, () => setTimeout(step, 30));
+  };
+  step();
+}
+
+/**
+ * A letter's scene. It is drawn by that letter's shader program; `plain` is
+ * the 2D version, used only where WebGL is not available at all.
  *
  * Which of the two a letter uses is decided ONCE, the first time it draws,
- * and never changes. `ready()` is false while the shader is still compiling,
- * and the engine does not start a letter until it is true. (Before this, a
- * letter drew a 2D stand-in until the shader was ready and then swapped to
- * the real scene mid-activation: that was the "L starts as one scene and
- * switches" glitch.)
+ * and never changes. `ready()` is false while the program is still
+ * compiling, and the engine does not start a letter until it is true.
+ * (Before this, a letter drew a 2D stand-in until its shader was ready and
+ * then swapped to the real scene mid-activation: that was the "L starts as
+ * one scene and switches" glitch.)
  */
 function live(kind: number, still: number, plain: Scene): Scene {
   let mode: "gl" | "2d" | null = null;
   return {
     still,
     ready() {
-      warmShader();
-      return !shared || shared.failed || shared.ready;
+      const s = context();
+      if (!s) return true;
+      if (!s.progs[kind]) compile(kind);
+      const p = s.progs[kind];
+      return !p || p.ready || p.failed;
     },
     draw(ctx, w, h, t) {
-      if (!mode) mode = shared && shared.ready ? "gl" : "2d";
       const s = shared;
-      if (mode === "2d" || !s) return plain.draw(ctx, w, h, t);
+      const p = s?.progs[kind];
+      if (!mode) mode = s && p && p.ready ? "gl" : "2d";
+      if (mode === "2d" || !s || !p) return plain.draw(ctx, w, h, t);
       const scale = Math.min(1, 300 / Math.max(w, h));
       const cw = Math.max(2, Math.round(w * scale));
       const ch = Math.max(2, Math.round(h * scale));
       const gl = s.gl;
+      gl.useProgram(p.prog);
       gl.viewport(0, 0, cw, ch);
-      gl.uniform2f(s.u.uRes, cw, ch);
-      gl.uniform1f(s.u.uTime, t);
-      gl.uniform1f(s.u.uKind, kind);
+      gl.uniform2f(p.uRes, cw, ch);
+      gl.uniform1f(p.uTime, t);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       // The viewport's origin is the bottom-left corner of the canvas.
       ctx.drawImage(s.canvas, 0, SIDE - ch, cw, ch, 0, 0, w, h);
