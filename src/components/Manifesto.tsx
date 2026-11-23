@@ -137,10 +137,7 @@ export default function Manifesto() {
     if (moving) {
       // The backdrop and the type take their opacity from --settle in CSS,
       // where the default is hidden: this chapter overlaps the hero, and must
-      // show nothing there before this script has run. Until now an inline
-      // script (layout.tsx) has been keeping --settle; take it over.
-      const early = (window as Window & { __mfSettle?: () => void }).__mfSettle;
-      if (early) window.removeEventListener("scroll", early);
+      // show nothing there before this script has run.
       const applySettle = (v: number) => {
         settle = v;
         el.style.setProperty("--settle", v.toFixed(3));

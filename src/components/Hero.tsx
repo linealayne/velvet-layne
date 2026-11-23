@@ -102,9 +102,16 @@ export default function Hero() {
         send({ type: "clear", i });
       };
 
+      // The engine has put a scene on screen in answer to an `on`. Counted on
+      // the letter itself, so a test (scripts/hover.mjs) can check that every
+      // single hover is answered.
+      const shown = (i: number) => {
+        nodes[i].dataset.lit = String(Number(nodes[i].dataset.lit || 0) + 1);
+      };
+
       const loadLocal = () =>
         (localLoading ??= import("@/lib/letterEngine").then(({ createEngine }) => {
-          local = createEngine(options, idle);
+          local = createEngine(options, idle, shown);
         }));
 
       // The worker failed or never answered: drop it and run the engine here.
@@ -136,6 +143,7 @@ export default function Hero() {
             worker = new Worker(new URL("../lib/letters.worker.ts", import.meta.url), { type: "module" });
             worker.onmessage = (e: MessageEvent<FromWorker>) => {
               if (e.data.type === "ready") window.clearTimeout(watchdog);
+              else if (e.data.type === "lit") shown(e.data.i);
               else idle(e.data.i);
             };
             worker.onerror = () => void abandonWorker();

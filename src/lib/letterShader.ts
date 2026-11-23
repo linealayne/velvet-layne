@@ -135,25 +135,49 @@ void main(){
     col+=pow(1.-n.z,2.)*vec3(.5,.45,.4);
 
   }else if(K(0.)){
-    // V: glossy black vinyl, a chrome streak sliding across the grooves.
+    // V: a record pressed in black lacquer, wet with light. The grooves pull
+    // the studio out into long chrome, orange and oxblood streaks, and the
+    // whole disc swells a little as it turns, like the Y's liquid surface.
     vec2 d=p-vec2(0.,-.38);
     float r=length(d),a=atan(d.y,d.x);
-    float groove=sin(r*150.)*.5+.5;
-    col=vec3(.012)+vec3(.04)*groove;
-    float s1=pow(abs(cos(a-uTime*.55)),110.);
-    float s2=pow(abs(cos(a-uTime*.55+1.15)),26.);
-    float s3=pow(abs(cos(a-uTime*.55-.5)),300.);
-    col+=(CHR*1.5*s1+SIG*.55*s2+vec3(1.)*s3)*(.5+.5*groove)*smoothstep(.2,.3,r);
-    col+=vec3(.07)*smoothstep(.97,1.,sin(r*21.));
-    // label, spinning
-    float sp=uTime*3.5;
-    vec2 dd=mat2(cos(sp),-sin(sp),sin(sp),cos(sp))*d;
-    vec3 lab=MOLT*(.8+.2*s1);
-    lab=mix(lab,BONE,step(abs(dd.y-.075),.012)*step(abs(dd.x),.12));
-    lab=mix(lab,BONE,step(abs(dd.y+.06),.008)*step(abs(dd.x),.08));
-    lab+=vec3(1.)*s1*.3;
-    col=mix(col,lab,smoothstep(.2,.192,r));
-    col=mix(col,vec3(0.),smoothstep(.024,.018,r));
+    float sp=uTime*.8;
+    vec2 rad=d/max(r,.001);
+    // the disc is never quite flat: a slow swell that turns with it
+    float sw=fbm(vec2(cos(a+sp),sin(a+sp))*r*2.4+vec2(3.,7.));
+    float sw2=fbm(vec2(cos(a+sp+.4),sin(a+sp+.4))*r*2.4+vec2(3.,7.));
+    float g=sin(r*190.+sw*9.);
+    vec3 n=normalize(vec3(rad*(g*.38+(sw-.5)*1.5)+vec2(-rad.y,rad.x)*(sw2-sw)*5.,1.));
+    vec3 rf=reflect(vec3(0.,0.,-1.),n);
+    // grooves smear a reflection around the disc: sample the studio along them
+    float around=a-sp*.55+(sw-.5)*1.3;
+    vec3 env=studio(normalize(vec3(cos(around)*.9,sin(around)*.75+rf.y*.6+.12,.5)));
+    float band=.5+.5*sin(r*11.-sw*6.);
+    col=vec3(.006,.004,.005);
+    col+=env*env*(.5+.7*band)*(.55+.45*g);
+    // the three hard streaks a record always has
+    float s1=pow(abs(cos(around)),70.);
+    float s2=pow(abs(cos(around+1.2)),18.);
+    float s3=pow(abs(cos(around-.62)),9.);
+    col+=CHR*1.7*s1*(.6+.4*g)+vec3(1.)*pow(s1,5.)*.9;
+    col+=SIG*.95*s2*(.45+.55*g)*(.4+.6*band);
+    col+=MOLT*.7*s3*(.4+.6*g)*(1.-band*.6);
+    // rim light off the lacquer itself
+    col+=pow(1.-n.z,2.)*vec3(.5,.45,.4)*.7;
+    // the gaps between tracks, and the run-out
+    col*=1.-.75*smoothstep(.94,1.,sin(r*23.+.6));
+    col*=smoothstep(.2,.27,r)*.85+.15;
+    // the label: a dome of molten lacquer
+    float sl=uTime*3.2;
+    vec2 dd=mat2(cos(sl),-sin(sl),sin(sl),cos(sl))*d;
+    vec3 ln=normalize(vec3(d*2.6+(sw-.5)*.3,1.));
+    vec3 lr=reflect(vec3(0.,0.,-1.),ln);
+    vec3 lab=MOLT*(.55+.5*sw)+OX*.4+studio(lr)*.55;
+    lab=mix(lab,BONE,step(abs(dd.y-.075),.011)*step(abs(dd.x),.12));
+    lab=mix(lab,SIG,step(abs(dd.y+.06),.008)*step(abs(dd.x),.085));
+    lab+=vec3(1.,.9,.8)*pow(max(0.,1.-length(d-vec2(-.06,.07))*9.),3.)*.8;
+    col=mix(col,lab,smoothstep(.205,.195,r));
+    col=mix(col,CHR*.9,smoothstep(.205,.2,r)*smoothstep(.19,.196,r));
+    col=mix(col,vec3(0.),smoothstep(.026,.02,r));
 
   }else if(K(1.)){
     // E: oxblood lacquer and liquid chrome, marbled.
@@ -189,7 +213,9 @@ void main(){
     col*=.8+.35*noise(vec2(gl_FragCoord.x*.6,gl_FragCoord.y*.1));
 
   }else if(K(5.)){
-    // T: the Corridor in miniature, glossy.
+    // T: the Corridor in miniature, built out of wet lacquer and chrome.
+    // Panels of oxblood, orange, bone and chrome rush in along four walls of
+    // black glass that mirror them; a white-hot point burns at the far end.
     vec2 q=p+vec2(0.,.06);
     float ax=abs(q.x)/.3,ay=abs(q.y)/.62;
     float m=max(max(ax,ay),.02);
@@ -197,19 +223,42 @@ void main(){
     bool wall=ax>ay;
     float across=wall?q.y/max(abs(q.x),.001)*.3:q.x/max(abs(q.y),.001)*.62;
     float face=wall?(q.x>0.?3.:7.):(q.y>0.?11.:17.);
-    float zz=z*.9+uTime*2.1;
-    vec2 f=vec2(fract(zz),fract(across*1.5+.5));
-    float id=hash(vec2(floor(zz),floor(across*1.5+.5)+face));
-    float panel=step(.1,f.x)*step(f.x,.9)*step(.08,f.y)*step(f.y,.92)*step(.36,id);
-    vec3 pc=id<.56?BONE:id<.72?SIG:id<.88?MOLT:CHR;
-    float light=smoothstep(11.,1.1,z);
-    col=pc*panel*light;
-    // gloss: a hard highlight running down each panel, and the wet floor
-    col+=vec3(1.)*pow(max(0.,1.-abs(f.y-.3)*5.),6.)*.35*panel*light;
-    if(!wall&&q.y<0.) col+=pc*.35*light*(1.-panel)*smoothstep(.5,.0,f.x)+CHR*.06*light;
-    col+=CHR*.05*light*(1.-panel);
-    // the frame at the centre
-    if(m<.13) col=m>.108?BONE:vec3(.015);
+    float zz=z*1.5+uTime*2.7;
+    vec2 cell=vec2(floor(zz),floor(across*2.2+.5));
+    vec2 f=vec2(fract(zz),fract(across*2.2+.5));
+    float id=hash(cell+face);
+    float inx=smoothstep(.08,.12,f.x)*smoothstep(.92,.88,f.x);
+    float iny=smoothstep(.07,.11,f.y)*smoothstep(.93,.89,f.y);
+    float panel=inx*iny*step(.3,id);
+    vec3 pc=id<.5?MOLT:id<.66?SIG:id<.8?OX*1.7:id<.91?CHR*.9:BONE*.9;
+    float light=smoothstep(13.,.9,z);
+    // every surface is wet: a rippled normal carries the studio across it
+    vec3 n=normalAt(p*1.6+vec2(0.,uTime*.25),1.5);
+    vec3 r=reflect(vec3(0.,0.,-1.),n);
+    vec3 env=studio(r);
+    // lacquer panels: colour, a pillowed face, a hard streak of light
+    vec2 c2=f*2.-1.;
+    float pill=1.-.5*pow(max(abs(c2.x),abs(c2.y)),4.);
+    vec3 lac=pc*(.34+.5*pill)+env*.3;
+    lac+=vec3(1.)*pow(max(0.,1.-abs(f.y-.26+n.x*.4)*5.5),7.)*.45;
+    lac+=CHR*pow(max(0.,1.-abs(f.x-.82)*9.),4.)*.25;
+    // black glass between them, mirroring the colour next door
+    vec3 glass=vec3(.006,.004,.005)+env*.14+pc*.2*(1.-iny)*inx*step(.3,id);
+    glass+=pc*.16*smoothstep(.5,0.,abs(f.x-.5))*step(.3,id);
+    col=mix(glass,lac,panel)*light;
+    // the floor and ceiling run with long reflections
+    if(!wall) col+=pc*.3*light*(1.-panel)*smoothstep(.75,.0,f.x)*step(.3,id);
+    // the far end: heat
+    float far=exp(-m*7.5);
+    col+=vec3(1.,.78,.5)*far*1.1+SIG*exp(-m*3.6)*.4+MOLT*exp(-m*1.8)*.16;
+    // oxblood haze in the depth instead of plain black
+    col+=OX*.5*smoothstep(4.,13.,z)*(1.-far);
+    col+=pow(1.-n.z,2.)*vec3(.5,.45,.4)*.5*light;
+    // the frame at the centre, in chrome
+    if(m<.135){
+      vec3 fr=studio(reflect(vec3(0.,0.,-1.),normalize(vec3(q*9.,1.))))*1.1+CHR*.1;
+      col=m>.108?fr:vec3(.012)+env*.1+vec3(1.,.5,.2)*exp(-length(q)*30.)*.7;
+    }
 
   }else if(K(6.)){
     // L: a white-hot pool of metal, sparks skating over it.
@@ -262,12 +311,18 @@ void main(){
     col+=vec3(1.,.85,.8)*I*smoothstep(.016,.006,d);
 
   }else{
-    // E: chrome and lacquer blocks snapping into a layout.
+    // E: a layout snapping together out of poured blocks. Each one is a
+    // pillow of liquid chrome, oxblood or orange lacquer or black glass,
+    // on a floor of wet black chrome that mirrors them.
     float A=uRes.y/uRes.x;
     vec2 q=vec2(uv.x,1.-uv.y);
-    float loop=mod(uTime,3.4);
-    float gone=clamp((loop-2.9)/.3,0.,1.);
-    col=vec3(.014,.01,.012)+CHR*.03*smoothstep(1.,0.,q.y);
+    float loop=mod(uTime,3.6);
+    float gone=clamp((loop-3.1)/.32,0.,1.);
+    // the liquid: one slow swell shared by the floor and every block
+    vec3 wn=normalAt(p*1.5,1.7);
+    float h0=height(p*1.5);
+    vec3 fr=reflect(vec3(0.,0.,-1.),wn);
+    col=vec3(.006,.004,.005)+studio(fr)*.2+OX*.22*smoothstep(.2,.8,h0);
     for(int i=0;i<9;i++){
       vec4 b=block(i);
       float fi=float(i);
@@ -279,17 +334,32 @@ void main(){
       vec2 off=dir==0?vec2(0.,-away):dir==1?vec2(away,0.):dir==3?vec2(-away,0.):vec2(0.,away*.5);
       off.y+=gone*.08;
       vec2 l=(q-b.xy-off)/b.zw;
+      float alpha=min(1.,pr*3.)*(1.-gone);
+      // its reflection lying on the wet floor just below it
+      vec2 lm=vec2(l.x+wn.x*.25,(q.y-b.y-b.w-off.y)/b.w);
+      if(lm.x>0.&&lm.x<1.&&lm.y>0.&&lm.y<.9){
+        vec3 tint=i==1?SIG:(i==4||i==5)?MOLT:i==8?SIG:CHR*.8;
+        col+=tint*.2*(1.-lm.y/.9)*alpha*(.6+.8*h0);
+      }
       if(l.x<0.||l.x>1.||l.y<0.||l.y>1.) continue;
-      // a soft bevel gives each block a rounded, glossy face
+      // a pillowed face: steep at the edges, swelling in the middle
       vec2 c=l*2.-1.;
       vec2 edge=vec2(b.z,b.w*A);
-      vec2 bev=sign(c)*pow(abs(c),vec2(5.))*vec2(1.,min(1.,edge.x/edge.y*.4+.3));
-      vec3 n=normalize(vec3(bev.x*1.3+(l.x-.5)*.25,-bev.y*1.3-(l.y-.5)*.5,1.));
+      float thin=min(1.,edge.x/edge.y*.4+.3);
+      vec2 bev=sign(c)*pow(abs(c),vec2(4.))*vec2(1.,thin);
+      vec3 n=normalize(vec3(bev.x*1.5+(l.x-.5)*.3+wn.x*.9,-bev.y*1.5-(l.y-.5)*.55+wn.y*.9,1.));
       vec3 r=reflect(vec3(0.,0.,-1.),n);
       vec3 s=studio(r);
-      vec3 mat=i==1?SIG*.85+s*.3:(i==4||i==5)?OX*1.1+MOLT*.2+s*.35:i==8?MOLT*.9+s*.3:s*.95+CHR*.08;
-      mat+=vec3(1.)*pow(max(0.,1.-abs(l.y-.22)*4.),5.)*.16;
-      float alpha=min(1.,pr*3.)*(1.-gone);
+      vec3 mat=i==1?SIG*.7+s*.5+vec3(1.,.5,.1)*h0*.25
+              :(i==4||i==5)?OX*.9+MOLT*.25*h0+s*.5
+              :i==8?SIG*.85+s*.4
+              :(i==2||i==6)?s*1.15+CHR*.06
+              :(i==3||i==7)?vec3(.012)+s*.55+OX*.3
+              :s*1.05+CHR*.1;
+      // a wet highlight across the top, and light caught in the rim
+      mat+=vec3(1.)*pow(max(0.,1.-abs(l.y-.2-wn.y*.5)*4.5),6.)*.3;
+      mat+=pow(1.-n.z,2.)*vec3(.6,.5,.45)*.8;
+      mat*=.55+.45*smoothstep(1.,.55,max(abs(c.x),abs(c.y)*thin));
       col=mix(col,mat,alpha);
     }
   }

@@ -29,7 +29,9 @@ type Letter = {
   gw: number;
   gh: number;
   scene: Scene;
-  phase: 0 | 1 | 2 | 3 | 4; // idle, wiping in, on, holding, wiping out
+  phase: 0 | 1 | 2 | 3 | 4 | 5; // idle, wiping in, on, holding, wiping out, coming back
+  /** An `on` is waiting to be answered with a drawn frame (see onLit). */
+  ack: boolean;
   pin: number;
   pout: number;
   holdUntil: number;
@@ -46,7 +48,12 @@ const frame: (fn: (t: number) => void) => number =
     ? (fn) => requestAnimationFrame(fn)
     : (fn) => setTimeout(() => fn(performance.now()), 16) as unknown as number;
 
-export function createEngine(options: EngineOptions, onIdle: (i: number) => void) {
+export function createEngine(
+  options: EngineOptions,
+  onIdle: (i: number) => void,
+  /** Called once per `on`, when that request has put the scene on screen. */
+  onLit: (i: number) => void = () => {}
+) {
   const { moving, coarse } = options;
   const letters: (Letter | undefined)[] = [];
   let running = false;
@@ -124,10 +131,21 @@ export function createEngine(options: EngineOptions, onIdle: (i: number) => void
           finish(L, i, now);
           return;
         }
+      } else if (L.phase === 5) {
+        // Asked for again while it was wiping out: the slice closes back up.
+        L.pout -= dt / WIPE;
+        if (L.pout <= 0) {
+          L.pout = 0;
+          L.phase = 2;
+        }
+      }
+      if (L.ack && (L.phase === 1 || L.phase === 2 || L.phase === 5)) {
+        L.ack = false;
+        onLit(i);
       }
       live++;
       // On touch devices a steady scene repaints at half rate; wipes stay smooth.
-      if (!coarse || odd || L.phase === 1 || L.phase === 4) paint(L, now);
+      if (!coarse || odd || L.phase === 1 || L.phase === 4 || L.phase === 5) paint(L, now);
     });
     if (live) frame(tick);
     else running = false;
@@ -154,6 +172,7 @@ export function createEngine(options: EngineOptions, onIdle: (i: number) => void
         dpr: 1,
         wanted: false,
         waiting: false,
+        ack: false,
       };
     },
     size(i: number, w: number, h: number, dpr: number) {
@@ -170,7 +189,12 @@ export function createEngine(options: EngineOptions, onIdle: (i: number) => void
       const L = letters[i];
       if (!L) return;
       L.wanted = true;
+      L.ack = true;
       if (L.phase === 3) L.phase = 2;
+      // Wiping out when it is asked for again: turn round and come back. (It
+      // used to carry on wiping out and then go idle with the pointer still
+      // on it, and nothing ever started it again: a dead letter.)
+      if (L.phase === 4) L.phase = 5;
       if (L.phase !== 0) return;
       // The scene's shader may still be compiling. Wait for it: a letter must
       // show one scene for its whole activation, never a stand-in first.
@@ -194,6 +218,8 @@ export function createEngine(options: EngineOptions, onIdle: (i: number) => void
         L.pout = 0;
         L.phase = 2;
         paint(L, now);
+        L.ack = false;
+        onLit(i);
         return;
       }
       L.pin = 0;
@@ -209,6 +235,8 @@ export function createEngine(options: EngineOptions, onIdle: (i: number) => void
       const L = letters[i];
       if (!L) return;
       L.wanted = false;
+      L.ack = false;
+      if (L.phase === 5) L.phase = 4;
       if (!moving && L.phase !== 0) finish(L, i, 0);
     },
     /** The page has shown its own letter again: empty the canvas. */

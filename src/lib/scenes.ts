@@ -592,11 +592,27 @@ function context() {
     preserveDrawingBuffer: true,
   }) as WebGLRenderingContext | null;
   if (!gl) return (shared = null);
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  return (shared = { canvas, gl, progs: [] });
+  const setup = () => {
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  };
+  setup();
+  const made: Shared = { canvas, gl, progs: [] };
+  // If the browser takes the context away (GPU reset, too many contexts on
+  // the page), every program dies with it. Forget them; they are compiled
+  // again on demand when the context comes back, and until then a letter
+  // draws its 2D version, so a hover is never left unanswered.
+  (canvas as EventTarget).addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    made.progs = [];
+  });
+  (canvas as EventTarget).addEventListener("webglcontextrestored", () => {
+    made.progs = [];
+    setup();
+  });
+  return (shared = made);
 }
 
 /** Start compiling one letter's program. Never blocks; `done` fires either way. */
@@ -665,7 +681,8 @@ function live(kind: number, still: number, plain: Scene): Scene {
     ready() {
       const s = context();
       if (!s) return true;
-      if (!s.progs[kind]) compile(kind);
+      if (!s.progs[kind] && !s.gl.isContextLost()) compile(kind);
+      if (s.gl.isContextLost()) return true;
       const p = s.progs[kind];
       return !p || p.ready || p.failed;
     },
@@ -673,7 +690,8 @@ function live(kind: number, still: number, plain: Scene): Scene {
       const s = shared;
       const p = s?.progs[kind];
       if (!mode) mode = s && p && p.ready ? "gl" : "2d";
-      if (mode === "2d" || !s || !p) return plain.draw(ctx, w, h, t);
+      // (!p.ready only happens after a lost context, while it recompiles.)
+      if (mode === "2d" || !s || !p || !p.ready) return plain.draw(ctx, w, h, t);
       const scale = Math.min(1, 300 / Math.max(w, h));
       const cw = Math.max(2, Math.round(w * scale));
       const ch = Math.max(2, Math.round(h * scale));
