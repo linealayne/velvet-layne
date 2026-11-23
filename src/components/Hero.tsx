@@ -4,31 +4,11 @@ import { useRef } from "react";
 import ColorField, { type FieldState } from "./ColorField";
 import { gsap, useStage, motionOn, isCoarse } from "@/lib/gsap";
 import { VELVET, LAYNE, type Glyph } from "@/lib/glyphs";
-import { LETTER_SCENES, warmChrome, type Scene } from "@/lib/scenes";
+import { LETTER_SCENES } from "@/lib/scenes";
+import type { Engine, EngineOptions } from "@/lib/letterEngine";
+import type { FromWorker, ToWorker } from "@/lib/letters.worker";
 
 const ALL: Glyph[] = [...VELVET, ...LAYNE];
-const BONE = "#efe4d0";
-const WIPE = 0.25; // seconds for the diagonal slice
-const HOLD = 500; // ms a scene lingers after the cursor leaves
-
-type Letter = {
-  el: HTMLElement;
-  inner: HTMLElement;
-  glyph: Glyph;
-  path: Path2D;
-  scene: Scene | null;
-  canvas: HTMLCanvasElement | null;
-  ctx: CanvasRenderingContext2D | null;
-  phase: 0 | 1 | 2 | 3 | 4; // idle, wiping in, on, holding, wiping out
-  pin: number;
-  pout: number;
-  holdUntil: number;
-  t0: number;
-  w: number;
-  h: number;
-  dpr: number;
-  wanted: boolean;
-};
 
 function Line({ glyphs, start, delay }: { glyphs: Glyph[]; start: number; delay: number }) {
   return (
@@ -58,6 +38,10 @@ function Line({ glyphs, start, delay }: { glyphs: Glyph[]; start: number; delay:
  * Each of the eleven letters is a window: hover it and a looping scene cuts in,
  * clipped to the letterform. Scrolling parts the name like a curtain, lets the
  * colour field bloom through its hues, then cools it to black for the Manifesto.
+ *
+ * The scenes are drawn by `lib/letterEngine.ts`. Normally that runs in a Web
+ * Worker on offscreen canvases, so letters cost the main thread nothing, lit
+ * or not. This component only sends "on" and "off".
  */
 export default function Hero() {
   const root = useRef<HTMLDivElement>(null);
@@ -70,197 +54,146 @@ export default function Hero() {
       const coarse = isCoarse();
       const state = field.current;
       const cleanups: (() => void)[] = [];
+      const options: EngineOptions = { moving, coarse };
       let locked = false;
 
-      /* ── The letters ── */
-      const letters: Letter[] = Array.from(el.querySelectorAll<HTMLElement>(".lt")).map((node, i) => ({
-        el: node,
-        inner: node.firstElementChild as HTMLElement,
-        glyph: ALL[i],
-        path: new Path2D(ALL[i].d),
-        scene: null,
-        canvas: null,
-        ctx: null,
-        phase: 0,
-        pin: 0,
-        pout: 0,
-        holdUntil: 0,
-        t0: 0,
-        w: 0,
-        h: 0,
-        dpr: 1,
-        wanted: false,
-      }));
+      const nodes = Array.from(el.querySelectorAll<HTMLElement>(".lt"));
+      const inner = nodes.map((n) => n.firstElementChild as HTMLElement);
+      const canvases: (HTMLCanvasElement | undefined)[] = [];
+      const lit = nodes.map(() => false);
 
-      const fit = (L: Letter) => {
-        if (!L.canvas) return;
-        L.w = L.inner.clientWidth;
-        L.h = L.inner.clientHeight;
-        L.dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-        L.canvas.width = Math.max(1, Math.round(L.w * L.dpr));
-        L.canvas.height = Math.max(1, Math.round(L.h * L.dpr));
+      /* ── The engine: a worker where possible, the main thread otherwise ── */
+      const canTransfer =
+        typeof Worker !== "undefined" && "transferControlToOffscreen" in HTMLCanvasElement.prototype;
+      let worker: Worker | null = null;
+      let local: Engine | null = null;
+      let localLoading: Promise<void> | null = null;
+
+      const send = (m: ToWorker, transfer?: Transferable[]) => {
+        if (worker) return worker.postMessage(m, transfer ?? []);
+        if (!local) return;
+        if (m.type === "add") local.add(m.i, m.canvas, m.d, m.gw, m.gh);
+        else if (m.type === "size") local.size(m.i, m.w, m.h, m.dpr);
+        else if (m.type === "on") local.on(m.i);
+        else if (m.type === "off") local.off(m.i);
+        else if (m.type === "clear") local.clear(m.i);
+        else if (m.type === "warm") local.warm();
       };
 
-      const paint = (L: Letter, now: number) => {
-        const { ctx, canvas, w, h, dpr, glyph } = L;
-        if (!ctx || !canvas || !L.scene || !w) return;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.save();
-        // Clip to the letterform, stretched to this letter's box.
-        ctx.setTransform((dpr * w) / glyph.w, 0, 0, (dpr * h) / glyph.h, 0, 0);
-        ctx.clip(L.path);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.fillStyle = BONE;
-        ctx.fillRect(0, 0, w, h);
-        // The diagonal slice: the scene lives between two slanted edges.
-        const slant = h * 0.3;
-        const ease = (p: number) => 1 - Math.pow(1 - p, 3);
-        const a = -slant + (w + 2 * slant) * ease(L.pin);
-        const b = -slant + (w + 2 * slant) * ease(L.pout);
-        ctx.beginPath();
-        ctx.moveTo(b + slant, -2);
-        ctx.lineTo(a + slant, -2);
-        ctx.lineTo(a - slant, h + 2);
-        ctx.lineTo(b - slant, h + 2);
-        ctx.closePath();
-        ctx.clip();
-        const t = moving ? (now - L.t0) / 1000 : L.scene.still;
-        L.scene.draw(ctx, w, h, t);
-        ctx.restore();
-        // A hairline in the letter colour keeps the silhouette when a scene is dark.
-        ctx.save();
-        ctx.setTransform((dpr * w) / glyph.w, 0, 0, (dpr * h) / glyph.h, 0, 0);
-        ctx.lineWidth = (2.4 * glyph.w) / w;
-        ctx.strokeStyle = BONE;
-        ctx.stroke(L.path);
-        ctx.restore();
+      // The scene has wiped out and left a plain letter: show the SVG again.
+      const idle = (i: number) => {
+        if (lit[i]) return; // re-lit in the meantime
+        nodes[i].classList.remove("is-on");
+        send({ type: "clear", i });
       };
 
-      const clear = (L: Letter) => {
-        L.phase = 0;
-        L.el.classList.remove("is-on");
-        if (L.ctx && L.canvas) {
-          L.ctx.setTransform(1, 0, 0, 1, 0, 0);
-          L.ctx.clearRect(0, 0, L.canvas.width, L.canvas.height);
-        }
-      };
-
-      let raf = 0;
-      let last = 0;
-      const tick = (now: number) => {
-        const dt = Math.min((now - last) / 1000, 0.05);
-        last = now;
-        let live = 0;
-        for (const L of letters) {
-          if (L.phase === 0) continue;
-          if (L.phase === 1) {
-            L.pin += dt / WIPE;
-            if (L.pin >= 1) {
-              L.pin = 1;
-              L.phase = 2;
-            }
-          } else if (L.phase === 2) {
-            if (!L.wanted) {
-              L.phase = 3;
-              L.holdUntil = now + HOLD;
-            }
-          } else if (L.phase === 3) {
-            if (L.wanted) L.phase = 2;
-            else if (now >= L.holdUntil) L.phase = 4;
-          } else if (L.phase === 4) {
-            L.pout += dt / WIPE;
-            if (L.pout >= 1) {
-              clear(L);
-              continue;
-            }
+      const boot = () => {
+        if (worker || local) return null;
+        if (localLoading) return localLoading;
+        if (canTransfer) {
+          try {
+            worker = new Worker(new URL("../lib/letters.worker.ts", import.meta.url), { type: "module" });
+            worker.onmessage = (e: MessageEvent<FromWorker>) => idle(e.data.i);
+            worker.postMessage({ type: "init", options } satisfies ToWorker);
+            return null;
+          } catch {
+            worker = null;
           }
-          live++;
-          paint(L, now);
         }
-        raf = live ? requestAnimationFrame(tick) : 0;
+        localLoading = import("@/lib/letterEngine").then(({ createEngine }) => {
+          local = createEngine(options, idle);
+        });
+        return localLoading;
       };
 
-      const activate = (L: Letter) => {
+      const sizeOf = (i: number) => ({
+        w: inner[i].clientWidth,
+        h: inner[i].clientHeight,
+        dpr: Math.min(window.devicePixelRatio || 1, coarse ? 1.25 : 1.5),
+      });
+
+      const ensure = (i: number) => {
+        if (canvases[i]) return;
+        const canvas = document.createElement("canvas");
+        canvas.className = "lt-scene";
+        inner[i].appendChild(canvas);
+        canvases[i] = canvas;
+        const g = ALL[i];
+        if (worker) {
+          const off = canvas.transferControlToOffscreen();
+          send({ type: "add", i, canvas: off, d: g.d, gw: g.w, gh: g.h }, [off]);
+        } else {
+          // Main-thread fallback: the engine accepts a normal canvas too.
+          local?.add(i, canvas, g.d, g.w, g.h);
+        }
+      };
+
+      const activate = async (i: number) => {
         if (locked) return;
-        L.wanted = true;
-        if (!L.canvas) {
-          L.canvas = document.createElement("canvas");
-          L.canvas.className = "lt-scene";
-          L.ctx = L.canvas.getContext("2d");
-          L.inner.appendChild(L.canvas);
-          L.scene = LETTER_SCENES[letters.indexOf(L)].make();
+        lit[i] = true;
+        const pending = boot();
+        if (pending) await pending;
+        if (!lit[i] || locked) return;
+        ensure(i);
+        if (!nodes[i].classList.contains("is-on")) {
+          send({ type: "size", i, ...sizeOf(i) });
+          nodes[i].classList.add("is-on");
+          if (moving) {
+            nodes[i].classList.remove("kick");
+            void nodes[i].offsetWidth;
+            nodes[i].classList.add("kick");
+          }
         }
-        if (L.phase === 3) {
-          L.phase = 2;
-          return;
-        }
-        if (L.phase === 1 || L.phase === 2) return;
-        fit(L);
-        if (!L.t0) L.t0 = performance.now();
-        L.el.classList.add("is-on");
-        if (!moving) {
-          // Reduced motion: one still frame, no wipe, no loop.
-          L.pin = 1;
-          L.pout = 0;
-          L.phase = 2;
-          paint(L, 0);
-          return;
-        }
-        L.pin = 0;
-        L.pout = 0;
-        L.phase = 1;
-        L.el.classList.remove("kick");
-        void L.el.offsetWidth;
-        L.el.classList.add("kick");
-        if (!raf) {
-          last = performance.now();
-          raf = requestAnimationFrame(tick);
-        }
+        send({ type: "on", i });
       };
 
-      const release = (L: Letter) => {
-        L.wanted = false;
-        if (!moving) clear(L);
+      const release = (i: number) => {
+        if (!lit[i]) return;
+        lit[i] = false;
+        send({ type: "off", i });
       };
+      const releaseAll = () => nodes.forEach((_, i) => release(i));
 
-      const releaseAll = () => letters.forEach(release);
-
-      letters.forEach((L) => {
+      nodes.forEach((node, i) => {
         const enter = (e: PointerEvent) => {
-          if (e.pointerType !== "touch") activate(L);
+          if (e.pointerType !== "touch") activate(i);
         };
         const leave = (e: PointerEvent) => {
-          if (e.pointerType !== "touch") release(L);
+          if (e.pointerType !== "touch") release(i);
         };
         const tap = (e: PointerEvent) => {
           if (e.pointerType !== "touch") return;
-          activate(L);
-          window.setTimeout(() => release(L), 1900);
+          activate(i);
+          window.setTimeout(() => release(i), 1900);
         };
-        L.el.addEventListener("pointerenter", enter);
-        L.el.addEventListener("pointerleave", leave);
-        L.el.addEventListener("pointerdown", tap);
+        node.addEventListener("pointerenter", enter);
+        node.addEventListener("pointerleave", leave);
+        node.addEventListener("pointerdown", tap);
         cleanups.push(() => {
-          L.el.removeEventListener("pointerenter", enter);
-          L.el.removeEventListener("pointerleave", leave);
-          L.el.removeEventListener("pointerdown", tap);
+          node.removeEventListener("pointerenter", enter);
+          node.removeEventListener("pointerleave", leave);
+          node.removeEventListener("pointerdown", tap);
         });
       });
 
       const ro = new ResizeObserver(() => {
-        letters.forEach((L) => {
-          if (L.phase === 0) return;
-          fit(L);
-          if (!moving) paint(L, 0);
+        canvases.forEach((c, i) => {
+          if (c && nodes[i].classList.contains("is-on")) send({ type: "size", i, ...sizeOf(i) });
         });
       });
       ro.observe(el.querySelector(".name")!);
       cleanups.push(() => ro.disconnect());
 
-      // Compile the chrome shader while nothing else is happening.
-      const warm = window.setTimeout(warmChrome, 1800);
-      cleanups.push(() => window.clearTimeout(warm));
+      // With a mouse: start the worker and compile the chrome shader ahead of
+      // the first hover, once the page has settled.
+      if (!coarse) {
+        const warm = window.setTimeout(async () => {
+          const pending = boot();
+          if (pending) await pending;
+          send({ type: "warm" });
+        }, 2200);
+        cleanups.push(() => window.clearTimeout(warm));
+      }
 
       // Touch screens have no hover, so the letters take turns on their own.
       if (coarse && moving) {
@@ -269,13 +202,13 @@ export default function Hero() {
         const next = () => {
           if (locked || document.hidden) return;
           if (!bag.length) {
-            bag = letters.map((_, i) => i).sort(() => Math.random() - 0.5);
+            bag = nodes.map((_, i) => i).sort(() => Math.random() - 0.5);
             if (bag[bag.length - 1] === previous) bag.reverse();
           }
           previous = bag.pop()!;
-          const L = letters[previous];
-          activate(L);
-          window.setTimeout(() => release(L), 1500);
+          const i = previous;
+          activate(i);
+          window.setTimeout(() => release(i), 1500);
         };
         const first = window.setTimeout(next, 3200);
         const id = window.setInterval(next, 2300);
@@ -323,9 +256,10 @@ export default function Hero() {
       }
 
       return () => {
-        cancelAnimationFrame(raf);
         cleanups.forEach((fn) => fn());
-        letters.forEach((L) => L.canvas?.remove());
+        worker?.terminate();
+        canvases.forEach((c) => c?.remove());
+        nodes.forEach((n) => n.classList.remove("is-on", "kick"));
       };
     },
     root,

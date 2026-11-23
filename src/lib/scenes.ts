@@ -8,8 +8,12 @@
  * context no matter how many letters are lit.
  */
 
+/** Scenes draw to a normal canvas or, inside the letter worker, an offscreen one. */
+export type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+export type Sheet = HTMLCanvasElement | OffscreenCanvas;
+
 export type Scene = {
-  draw: (ctx: CanvasRenderingContext2D, w: number, h: number, t: number) => void;
+  draw: (ctx: Ctx, w: number, h: number, t: number) => void;
   /** A flattering moment to freeze on for reduced motion and for stills. */
   still: number;
 };
@@ -31,42 +35,59 @@ const outBack = (x: number) => {
   return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2);
 };
 
-function cached(w: number, h: number, paint: (c: CanvasRenderingContext2D) => void) {
+function sheet(w: number, h: number): Sheet {
+  const cw = Math.max(1, Math.round(w));
+  const ch = Math.max(1, Math.round(h));
+  if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(cw, ch);
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(w));
-  canvas.height = Math.max(1, Math.round(h));
-  paint(canvas.getContext("2d")!);
+  canvas.width = cw;
+  canvas.height = ch;
+  return canvas;
+}
+
+/** Draw something once and keep it: static parts of a scene are blitted, not redrawn. */
+function cached(w: number, h: number, paint: (c: Ctx) => void) {
+  const canvas = sheet(w, h);
+  paint(canvas.getContext("2d") as Ctx);
   return canvas;
 }
 
 /* ───────── V: a spinning vinyl record, seen close ───────── */
 function vinyl(): Scene {
+  let key = "";
+  let disc: Sheet | null = null;
   return {
     still: 1.3,
     draw(ctx, w, h, t) {
-      ctx.fillStyle = "#050404";
-      ctx.fillRect(0, 0, w, h);
       const cx = w * 0.5;
       const cy = h * 0.66;
       const R = Math.hypot(w, h) * 0.8;
-      ctx.lineWidth = 1.4;
-      for (let r = R, i = 0; r > R * 0.24; r -= 3.2, i++) {
-        ctx.strokeStyle = i % 7 === 0 ? "#050404" : i % 2 ? "#1d1a19" : "#121010";
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, TAU);
-        ctx.stroke();
+      if (key !== `${w}x${h}`) {
+        key = `${w}x${h}`;
+        // The grooves never change, so they are drawn once.
+        disc = cached(w, h, (c) => {
+          c.fillStyle = "#050404";
+          c.fillRect(0, 0, w, h);
+          c.lineWidth = 1.4;
+          for (let r = R, i = 0; r > R * 0.24; r -= 3.2, i++) {
+            c.strokeStyle = i % 7 === 0 ? "#050404" : i % 2 ? "#1d1a19" : "#121010";
+            c.beginPath();
+            c.arc(cx, cy, r, 0, TAU);
+            c.stroke();
+          }
+        });
       }
+      ctx.drawImage(disc!, 0, 0, w, h);
       // Light sliding across the grooves.
       if (ctx.createConicGradient) {
         const g = ctx.createConicGradient(t * 0.55, cx, cy);
-        const streak = (at: number, a: number) => {
-          g.addColorStop(frac(at - 0.035), "rgba(255,236,214,0)");
-          g.addColorStop(frac(at), `rgba(255,236,214,${a})`);
-          g.addColorStop(frac(at + 0.035), "rgba(255,236,214,0)");
-        };
         g.addColorStop(0, "rgba(255,236,214,0)");
-        streak(0.2, 0.6);
-        streak(0.7, 0.42);
+        g.addColorStop(0.165, "rgba(255,236,214,0)");
+        g.addColorStop(0.2, "rgba(255,236,214,.6)");
+        g.addColorStop(0.235, "rgba(255,236,214,0)");
+        g.addColorStop(0.665, "rgba(255,236,214,0)");
+        g.addColorStop(0.7, "rgba(255,236,214,.42)");
+        g.addColorStop(0.735, "rgba(255,236,214,0)");
         g.addColorStop(1, "rgba(255,236,214,0)");
         ctx.globalCompositeOperation = "lighter";
         ctx.fillStyle = g;
@@ -75,6 +96,7 @@ function vinyl(): Scene {
       }
       // Dust riding the grooves shows the spin.
       const spin = t * 3.49;
+      ctx.lineWidth = 1.4;
       ctx.strokeStyle = "rgba(239,228,208,.55)";
       for (let i = 0; i < 9; i++) {
         const r = R * (0.3 + rnd(i) * 0.66);
@@ -106,7 +128,7 @@ function vinyl(): Scene {
 /* ───────── E: a screen-print pull, three passes, off register ───────── */
 function print(): Scene {
   let key = "";
-  let layers: HTMLCanvasElement[] = [];
+  let layers: Sheet[] = [];
   const build = (w: number, h: number) => {
     const step = Math.max(9, Math.round(Math.min(w, h) / 15));
     const shapes = [
@@ -208,7 +230,8 @@ function threads(): Scene {
 /* ───────── V: VHS tape, tracking roll, running timecode ───────── */
 function vhs(): Scene {
   let key = "";
-  let tape: HTMLCanvasElement | null = null;
+  let tape: Sheet | null = null;
+  let lines: Sheet | null = null;
   return {
     still: 2.2,
     draw(ctx, w, h, t) {
@@ -229,11 +252,15 @@ function vhs(): Scene {
           c.arc(w * 0.5, h * 0.62, Math.min(w, h) * 0.17, 0, TAU);
           c.fill();
         });
+        lines = cached(w, h, (c) => {
+          c.fillStyle = "rgba(0,0,0,.28)";
+          for (let y = 0; y < h; y += 3) c.fillRect(0, y, w, 1);
+        });
       }
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, w, h);
       const roll = frac(t * 0.33) * 1.3 - 0.15;
-      const slice = 5;
+      const slice = 8;
       for (let y = 0; y < h; y += slice) {
         const inBand = Math.abs(y / h - roll) < 0.07;
         const jitter = Math.sin(y * 0.11 + t * 31) * 1.2 + (inBand ? Math.sin(y * 0.9 + t * 60) * w * 0.12 : 0);
@@ -245,11 +272,10 @@ function vhs(): Scene {
       ctx.drawImage(tape!, w * 0.03, 0, w, h);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
-      ctx.fillStyle = "rgba(0,0,0,.28)";
-      for (let y = 0; y < h; y += 3) ctx.fillRect(0, y, w, 1);
+      ctx.drawImage(lines!, 0, 0, w, h);
       ctx.fillStyle = "rgba(255,255,255,.75)";
       const seed = Math.floor(t * 24);
-      for (let i = 0; i < 22; i++) {
+      for (let i = 0; i < 12; i++) {
         const y = (roll + (rnd(seed + i) - 0.5) * 0.16) * h;
         ctx.fillRect(rnd(seed + i * 3) * w, y, 4 + rnd(seed + i * 7) * w * 0.25, 1.5);
       }
@@ -322,15 +348,15 @@ function sparks(): Scene {
     still: 1.2,
     draw(ctx, w, h, t) {
       const fresh = last < 0 || t < last || t - last > 0.5;
-      const steps = fresh ? 40 : 1;
-      const dt = fresh ? 1 / 40 : Math.min(t - last, 0.05);
+      const steps = fresh ? 24 : 1;
+      const dt = fresh ? 1 / 30 : Math.min(t - last, 0.05);
       last = t;
       if (fresh) parts = [];
       const ox = w * 0.38;
       const oy = h * 0.16;
       const u = Math.max(w, h) / 420;
       for (let s = 0; s < steps; s++) {
-        for (let i = 0; i < 7; i++) {
+        for (let i = 0; i < 4; i++) {
           n++;
           const a = 0.35 + rnd(n) * 2.3;
           const sp = (160 + rnd(n + 0.5) * 520) * u;
@@ -372,46 +398,51 @@ function sparks(): Scene {
 
 /* ───────── A: a slowly rotating galaxy ───────── */
 function galaxy(): Scene {
-  const N = 900;
-  const stars = Array.from({ length: N }, (_, i) => {
-    const arm = i % 3;
-    const r = Math.pow(rnd(i), 0.62);
-    return {
-      r,
-      a: (arm * TAU) / 3 + r * 4.6 + (rnd(i + 0.3) - 0.5) * (0.9 - r * 0.5),
-      s: 1 + rnd(i + 0.6) * 2.3,
-      c: rnd(i + 0.8) < 0.14 ? SIGNAL : rnd(i + 0.8) < 0.3 ? CHROME : BONE,
-      o: 0.35 + rnd(i + 0.2) * 0.65,
-    };
-  });
+  let key = "";
+  let stars: Sheet | null = null;
+  let sky: Sheet | null = null;
   return {
     still: 4,
     draw(ctx, w, h, t) {
-      ctx.fillStyle = "#020103";
-      ctx.fillRect(0, 0, w, h);
       const cx = w * 0.5;
       const cy = h * 0.56;
       const R = Math.max(w, h) * 0.7;
-      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.5);
-      core.addColorStop(0, "rgba(255,226,190,1)");
-      core.addColorStop(0.16, "rgba(255,110,40,.6)");
-      core.addColorStop(0.5, "rgba(140,16,30,.16)");
-      core.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = core;
-      ctx.fillRect(0, 0, w, h);
-      const tilt = 0.5;
-      const lean = -0.5;
-      const cl = Math.cos(lean);
-      const sl = Math.sin(lean);
-      for (const s of stars) {
-        const a = s.a + t * (0.22 + (1 - s.r) * 0.25);
-        const x = Math.cos(a) * s.r * R;
-        const y = Math.sin(a) * s.r * R * tilt;
-        ctx.globalAlpha = s.o;
-        ctx.fillStyle = s.c;
-        ctx.fillRect(cx + x * cl - y * sl, cy + x * sl + y * cl, s.s, s.s);
+      if (key !== `${w}x${h}`) {
+        key = `${w}x${h}`;
+        // Sky and core glow, drawn once.
+        sky = cached(w, h, (c) => {
+          c.fillStyle = "#020103";
+          c.fillRect(0, 0, w, h);
+          const core = c.createRadialGradient(cx, cy, 0, cx, cy, R * 0.5);
+          core.addColorStop(0, "rgba(255,226,190,1)");
+          core.addColorStop(0.16, "rgba(255,110,40,.6)");
+          core.addColorStop(0.5, "rgba(140,16,30,.16)");
+          core.addColorStop(1, "rgba(0,0,0,0)");
+          c.fillStyle = core;
+          c.fillRect(0, 0, w, h);
+        });
+        // The spiral arms, drawn once face-on. Each frame only turns the sheet.
+        const S = Math.ceil(R * 2);
+        stars = cached(S, S, (c) => {
+          for (let i = 0; i < 900; i++) {
+            const r = Math.pow(rnd(i), 0.62);
+            const a = ((i % 3) * TAU) / 3 + r * 4.6 + (rnd(i + 0.3) - 0.5) * (0.9 - r * 0.5);
+            const s = 1 + rnd(i + 0.6) * 2.3;
+            const pick = rnd(i + 0.8);
+            c.globalAlpha = 0.35 + rnd(i + 0.2) * 0.65;
+            c.fillStyle = pick < 0.14 ? SIGNAL : pick < 0.3 ? CHROME : BONE;
+            c.fillRect(R + Math.cos(a) * r * R, R + Math.sin(a) * r * R, s, s);
+          }
+        });
       }
-      ctx.globalAlpha = 1;
+      ctx.drawImage(sky!, 0, 0, w, h);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(-0.5);
+      ctx.scale(1, 0.5);
+      ctx.rotate(t * 0.3);
+      ctx.drawImage(stars!, -R, -R, R * 2, R * 2);
+      ctx.restore();
     },
   };
 }
@@ -425,9 +456,56 @@ function neon(): Scene {
     [0.76, 0.66],
     [0.24, 0.9],
   ];
+  let key = "";
+  let off: Sheet | null = null;
+  let lit: Sheet | null = null;
   return {
     still: 3,
     draw(ctx, w, h, t) {
+      if (key !== `${w}x${h}`) {
+        key = `${w}x${h}`;
+        const u = Math.min(w, h) / 200;
+        const trace = (c: Ctx) => {
+          c.beginPath();
+          pts.forEach(([x, y], i) => (i ? c.lineTo(x * w, y * h) : c.moveTo(x * w, y * h)));
+        };
+        // Two states drawn once: the dead tube, and the tube fully lit.
+        off = cached(w, h, (c) => {
+          c.fillStyle = "#090203";
+          c.fillRect(0, 0, w, h);
+          c.lineJoin = "round";
+          c.lineCap = "round";
+          c.strokeStyle = "#3a0a0e";
+          c.lineWidth = 9 * u;
+          trace(c);
+          c.stroke();
+        });
+        lit = cached(w, h, (c) => {
+          const wash = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.75);
+          wash.addColorStop(0, "rgba(255,20,30,.32)");
+          wash.addColorStop(1, "rgba(255,20,30,0)");
+          c.fillStyle = wash;
+          c.fillRect(0, 0, w, h);
+          c.lineJoin = "round";
+          c.lineCap = "round";
+          c.globalCompositeOperation = "lighter";
+          [
+            [54, 0.07],
+            [32, 0.13],
+            [18, 0.28],
+          ].forEach(([lw, a]) => {
+            c.strokeStyle = `rgba(255,26,36,${a})`;
+            c.lineWidth = lw * u;
+            trace(c);
+            c.stroke();
+          });
+          c.globalCompositeOperation = "source-over";
+          c.strokeStyle = "#ffe6dc";
+          c.lineWidth = 6 * u;
+          trace(c);
+          c.stroke();
+        });
+      }
       const loop = t % 3.6;
       let I = 1;
       if (loop < 0.22) I = 0;
@@ -438,42 +516,10 @@ function neon(): Scene {
       else if (loop < 0.74) I = 1;
       else if (loop < 0.86) I = 0.3;
       else I = 0.9 + 0.1 * Math.sin(t * 70);
-      ctx.fillStyle = "#090203";
-      ctx.fillRect(0, 0, w, h);
-      const wash = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.75);
-      wash.addColorStop(0, `rgba(255,20,30,${0.32 * I})`);
-      wash.addColorStop(1, "rgba(255,20,30,0)");
-      ctx.fillStyle = wash;
-      ctx.fillRect(0, 0, w, h);
-      const u = Math.min(w, h) / 200;
-      const trace = () => {
-        ctx.beginPath();
-        pts.forEach(([x, y], i) => (i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h)));
-      };
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      ctx.strokeStyle = "#3a0a0e";
-      ctx.lineWidth = 9 * u;
-      trace();
-      ctx.stroke();
-      ctx.globalCompositeOperation = "lighter";
-      [
-        [54, 0.07],
-        [32, 0.13],
-        [18, 0.28],
-      ].forEach(([lw, a]) => {
-        ctx.strokeStyle = `rgba(255,26,36,${a * I})`;
-        ctx.lineWidth = lw * u;
-        trace();
-        ctx.stroke();
-      });
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = `rgba(255,${Math.round(90 + 140 * I)},${Math.round(80 + 130 * I)},${0.15 + 0.85 * I})`;
-      ctx.lineWidth = 6 * u;
-      trace();
-      ctx.stroke();
-      ctx.lineJoin = "miter";
-      ctx.lineCap = "butt";
+      ctx.drawImage(off!, 0, 0, w, h);
+      ctx.globalAlpha = I;
+      ctx.drawImage(lit!, 0, 0, w, h);
+      ctx.globalAlpha = 1;
     },
   };
 }
@@ -563,7 +609,7 @@ void main(){
 }`;
 
 type Shared = {
-  canvas: HTMLCanvasElement;
+  canvas: Sheet;
   gl: WebGLRenderingContext;
   prog: WebGLProgram;
   ready: boolean;
@@ -575,10 +621,14 @@ let sharedTried = false;
 
 /** Start compiling the chrome shader. Safe to call early; never blocks. */
 export function warmChrome() {
-  if (sharedTried || typeof document === "undefined") return;
+  if (sharedTried) return;
   sharedTried = true;
-  const canvas = document.createElement("canvas");
-  const gl = canvas.getContext("webgl", { antialias: false, alpha: false, preserveDrawingBuffer: true });
+  const canvas = sheet(2, 2);
+  const gl = canvas.getContext("webgl", {
+    antialias: false,
+    alpha: false,
+    preserveDrawingBuffer: true,
+  }) as WebGLRenderingContext | null;
   if (!gl) return;
   const make = (type: number, src: string) => {
     const s = gl.createShader(type)!;
@@ -614,22 +664,66 @@ export function warmChrome() {
   wait();
 }
 
+/**
+ * Phones do not get a second WebGL context for two letters. With `lite` on,
+ * the chrome scenes are drawn in 2D instead: a reflection strip slid through
+ * a sine, a few dozen blits per frame.
+ */
+let lite = false;
+export function setLite(on: boolean) {
+  lite = on;
+}
+
+function ribbons(kind: 0 | 1): Scene["draw"] {
+  let strip: Sheet | null = null;
+  return (ctx, w, h, t) => {
+    if (!strip) {
+      // One tall strip of studio reflections, twice over so it can wrap.
+      strip = cached(4, 512, (c) => {
+        const g = c.createLinearGradient(0, 0, 0, 256);
+        const stops: [number, string][] = [
+          [0, "#0b0909"],
+          [0.1, "#fff6ea"],
+          [0.2, CHROME],
+          [0.3, "#141011"],
+          [0.44, SIGNAL],
+          [0.5, "#ffd9a8"],
+          [0.58, MOLTEN],
+          [0.7, "#0b0909"],
+          [0.84, CHROME],
+          [0.93, "#2a2224"],
+          [1, "#0b0909"],
+        ];
+        stops.forEach(([o, col]) => g.addColorStop(o, col));
+        c.fillStyle = g;
+        c.fillRect(0, 0, 4, 256);
+        c.drawImage(c.canvas, 0, 0, 4, 256, 0, 256, 4, 256);
+      });
+    }
+    const bands = Math.max(8, Math.round(w / 7));
+    const bw = w / bands;
+    const span = kind ? 150 : 110;
+    for (let i = 0; i < bands; i++) {
+      const u = i / bands;
+      const wave = kind
+        ? Math.sin(u * 5 + t * 0.9) * 46 + Math.sin(u * 11 - t * 1.4) * 18 + t * 12
+        : Math.sin(u * 9 + t * 0.6) * 30 + Math.sin(u * 21 + i) * 14 - t * 90;
+      const sy = ((wave % 256) + 256) % 256;
+      ctx.drawImage(strip, 0, sy, 4, span, i * bw, 0, bw + 0.6, h);
+    }
+  };
+}
+
 function chrome(kind: 0 | 1): Scene {
+  const flat = ribbons(kind);
   return {
     still: 2.5,
     draw(ctx, w, h, t) {
+      if (lite) return flat(ctx, w, h, t);
       warmChrome();
       const s = shared;
-      if (!s || !s.ready) {
-        // Until the shader is ready (or if WebGL is missing): brushed metal bands.
-        const g = ctx.createLinearGradient(0, 0, w * 0.4, h);
-        ["#0b0909", CHROME, "#1a1616", "#fff6ea", SIGNAL, "#0b0909", CHROME, MOLTEN].forEach((c, i, a) =>
-          g.addColorStop(frac(i / a.length + (kind ? 0 : t * 0.12)), c)
-        );
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, w, h);
-        return;
-      }
+      // Until the shader is ready (or if WebGL is missing): the 2D version.
+      if (!s || !s.ready) return flat(ctx, w, h, t);
       const scale = Math.min(1, 300 / Math.max(w, h));
       const cw = Math.max(2, Math.round(w * scale));
       const ch = Math.max(2, Math.round(h * scale));
