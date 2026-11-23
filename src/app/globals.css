@@ -319,8 +319,11 @@ html.anim .cue span {
   background: var(--black);
   color: var(--bone);
 }
+/* The last 190svh of this chapter are shared with the pillar transition,
+   which sits on top of it (see .bridge-columns): the pillars start to fall
+   the moment the last word has lit. */
 html.anim .manifesto {
-  height: 340svh;
+  height: 410svh;
 }
 .mf-stage {
   position: relative;
@@ -335,11 +338,23 @@ html.anim .mf-stage {
   top: 0;
   height: 100svh;
 }
+.mf-stage {
+  /* What shows before the velvet shader is ready, or without WebGL. */
+  background:
+    radial-gradient(90% 70% at 30% 35%, #2a060d 0%, transparent 70%),
+    radial-gradient(70% 60% at 78% 70%, #1c0409 0%, transparent 70%),
+    var(--black);
+}
 .mf-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  opacity: 0;
+  transition: opacity 0.7s ease;
+}
+.mf-canvas.is-live {
+  opacity: 1;
 }
 .mf-lines {
   position: relative;
@@ -393,8 +408,12 @@ html.anim .bridge {
 }
 
 /* columns: Manifesto → Editorial */
+/* The pillars fall over the live Manifesto, not over a blank screen. */
+html.anim .bridge-columns {
+  margin-top: -190svh;
+}
 .bridge-columns .b-from {
-  background: var(--black);
+  background: transparent;
 }
 .cols {
   position: absolute;
@@ -410,6 +429,10 @@ html.anim .bridge {
 }
 
 /* iris: Corridor → Dimension */
+/* Starts the instant the Corridor has gone dark, with no black gap between. */
+html.anim .bridge-iris {
+  margin-top: -100svh;
+}
 .bridge-iris .b-from {
   background: #000;
 }
@@ -583,8 +606,11 @@ html.anim .bridge {
   background: #000;
   color: var(--bone);
 }
+/* The stage takes over one screen early, on top of Editorial's last screen,
+   so the page that is on screen is the page that gets pulled in. */
 html.anim .corridor {
   height: 470svh;
+  margin-top: -100svh;
 }
 .cor-stage {
   position: relative;
@@ -627,16 +653,46 @@ html.anim .cor-stage {
 .no-gl .cor-fallback {
   display: block;
 }
-/* Editorial's paper carries into the stage, then fades slowly to black. */
-.cor-paper {
+/* The entrance: a copy of Editorial's last screen, pulled down the tunnel. */
+.vac-page {
   display: none;
+}
+html.anim .vac-page {
+  display: block;
   position: absolute;
   inset: 0;
-  background: var(--paper);
+  overflow: hidden;
   pointer-events: none;
 }
-html.anim .cor-paper {
-  display: block;
+.vac-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+}
+.vac-main {
+  background: var(--paper);
+}
+/* Ghosts carry the page's ink only, so the streak falls across the walls. */
+.vac-ghost {
+  opacity: 0;
+}
+.vac-ghost .vac-ed {
+  background: none;
+}
+.vac-page .vac-ed {
+  position: absolute;
+  inset: auto 0 0;
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+.vac-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: #000;
+  opacity: 0;
 }
 .cor-frame {
   position: absolute;
@@ -1352,6 +1408,15 @@ main > .bridge {
   html.anim .bridge {
     height: 170svh;
   }
+  html.anim .manifesto {
+    height: 390svh;
+  }
+  html.anim .bridge-columns {
+    margin-top: -170svh;
+  }
+  html.anim .bridge-iris {
+    margin-top: -100lvh;
+  }
   .tiles {
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: repeat(10, 1fr);
@@ -1417,6 +1482,11 @@ main > .bridge {
   /* ── Corridor: the frame fits the width ── */
   html.anim .corridor {
     height: 400svh;
+    margin-top: -100lvh;
+  }
+  /* One ghost is enough on a phone. */
+  .vac-ghost + .vac-ghost {
+    display: none;
   }
   .cor-frame {
     width: 80vw;
@@ -1522,8 +1592,11 @@ main > .bridge {
     padding: 0 3vw;
     font-size: min(56vw, 25svh);
   }
+  .sys-word:nth-of-type(2) {
+    font-size: 0.72em;
+  }
   .sys-word:nth-of-type(4) {
-    font-size: 0.74em;
+    font-size: 0.56em;
   }
 
   /* ── Footer: a button you can hit with a thumb ── */

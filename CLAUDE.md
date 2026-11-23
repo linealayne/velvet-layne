@@ -37,7 +37,7 @@ node scripts/captures.mjs                        # re-capture the demo sites
 node scripts/og.mjs [url]                        # regenerate the share card
 node scripts/grain.mjs                           # regenerate the film grain tile
 node scripts/cold.mjs [url] [outDir]             # cold, throttled first visit to the Corridor
-node scripts/manifesto.mjs [url] [outDir]        # Manifesto background: drift and cursor
+node scripts/v4.mjs [url] [outDir] [run]         # velvet, pillar handoff, vacuum entrance, tracers, finale
 ```
 
 `scripts/shots.mjs` uses `playwright-core`. It captures the hero at rest,
@@ -55,20 +55,24 @@ set is in `screenshots/`.
 | # | Chapter | Files | What it is |
 |---|---------|-------|------------|
 | 1 | Hero | `Hero.tsx`, `ColorField.tsx`, `lib/glyphs.ts`, `lib/scenes.ts`, `lib/letterEngine.ts`, `lib/letters.worker.ts` | VELVET / LAYNE filling the screen over the molten colour field, plus the scroll cue. Each letter is a window onto a scene. |
-| 2 | Manifesto | `Manifesto.tsx` | Mostly black. A handful of hairline oxblood threads wander at different depths, with dust. Four lines light up word by word. |
+| 2 | Manifesto | `Manifesto.tsx` | A full screen of very dark oxblood velvet (shader) that you can brush. Four lines light up word by word. |
 | 3 | Editorial | `Editorial.tsx`, `lib/art.ts` | The light moment: warm tan paper, Swiss grid, oversized Bodoni numerals, SVG plates with mask reveals. |
 | 4 | The Corridor | `Corridor.tsx`, `CorridorScene.tsx`, `lib/posters.ts`, `public/work/` | The centrepiece. A three.js gallery tunnel: panels stream along floor, ceiling and walls into the vanishing point and never stop. |
 | 5 | Dimension | `Dimension.tsx`, `Sculpture.tsx` | The iridescent chrome knot. |
 | 6 | Brutal | `Brutal.tsx` | Signal orange, hard borders, glitch on hover. |
-| 7 | Finale | `Finale.tsx`, `Footer.tsx` | SEE / YOU / SOON with two rings of tiles orbiting through the words, then the ask, the credit and the cursor tracers. |
+| 7 | Finale | `Finale.tsx`, `Footer.tsx` | MAKE / IT / YOURS. with two rings of tiles orbiting through the words, then the ask, the credit and the cursor tracers. |
 
 Transitions (each pair uses a different one, none may repeat):
 
 1. Hero → Manifesto: the name parts like a curtain, the field blooms through
    its hues, then cools to black (`Hero.tsx`)
-2. Manifesto → Editorial: `columns`, paper drops in as grid columns
-3. Editorial → Corridor: tan paper fades slowly to black (`Corridor.tsx`)
-4. Corridor → Dimension: `iris`, a red dot opens out of the black
+2. Manifesto → Editorial: `columns`, paper drops in as grid columns. The
+   bridge overlaps the end of the Manifesto (negative margin), so the pillars
+   start falling the moment the last word has lit.
+3. Editorial → Corridor: the vacuum entrance. The page is pulled down the
+   tunnel and becomes its walls (`Corridor.tsx`, see below).
+4. Corridor → Dimension: `iris`, a red dot opens out of the black. It also
+   overlaps the end of the Corridor so there is no black gap before the dot.
 5. Dimension → Brutal: `tiles`, hard-cut blocks, no easing
 6. Brutal → Finale: `hinge`, the slab swings off its top-left corner
 
@@ -162,6 +166,22 @@ How it works:
 - In portrait (aspect under 0.8) the tunnel is narrower and taller with a
   wider field of view, one lane on the floor and ceiling, and fewer, larger
   panels spaced further apart so each can be read on a phone.
+- **The entrance (do not turn this back into a fade).** The Corridor's stage
+  takes over one screen early, on top of Editorial's last screen
+  (`margin-top: -100svh`). `.vac-page` is a copy of exactly what Editorial is
+  showing at that moment, cloned from the real DOM. Scrolling scales that
+  page about the centre by `exp(-4.3 * p^1.55)`, which is how a wall recedes
+  down the tunnel, while `CorridorScene` draws four tan, streaked walls
+  (`skins`) whose cross-section has exactly the screen's shape. So the page's
+  edges stay welded to the walls: the page becomes the tunnel. Two fainter
+  copies of the page's ink lag behind it as a motion streak.
+  `entranceLight(p)` in `lib/corridorState.ts` drives the light for both
+  halves: the fog closes in from the far end (the centre of the screen
+  outward) until everything is black, then opens on the real tunnel, and
+  only then do the panels come up. The panels are hidden while the walls are
+  paper, so the tunnel never shows through the tan. The camera holds still
+  during the entrance. Scrubbed and fully reversible. Reduced motion: no
+  entrance at all, a clean cut to a still frame.
 - **It must be populated the instant it comes on screen, on a first visit.**
   How that is guaranteed:
   1. `lib/corridorAssets.ts` `preloadCorridor()` runs once the hero has
@@ -175,23 +195,34 @@ How it works:
   3. Every capture panel has an immediate fallback: a solid colour with the
      demo site's name. When the real image lands it is drawn into the same
      canvas and the panel fades up from dim.
-  4. The tunnel and the centre frame are at full opacity under Editorial's
-     paper, which simply thins out over them. Nothing fades in afterwards.
+  4. All of this is finished long before the entrance has pulled the page
+     away.
   Check it with `node scripts/cold.mjs` (cache off, Fast 4G).
 - Reduced motion: one still frame of the tunnel.
 
-### Manifesto background
+### Manifesto background: velvet
 
-A 2D canvas in `Manifesto.tsx`. Seven threads (five on phones), each a
-parametric curve built from two sine harmonics per axis with frequency pairs
-such as 1:2 and 2:3, which is what gives figure-eights, loose loops and long
-S-curves instead of parallel waves. Each thread has a depth that sets its
-weight (hairline), opacity (low) and parallax. The phases advance slowly, so
-the threads are always drifting. They are drawn whole every frame: nothing
-ever draws itself on. A short brighter segment travels along a thread now and
-then. Every point keeps an eased offset away from the cursor, so threads part
-softly around it and take a moment to settle; on touch screens they lean with
-scroll velocity instead. Dust at three depths. Keep it sparse.
+A raw WebGL fragment shader in `Manifesto.tsx`, written for this page.
+
+- **The cloth.** A heightfield of long, leaning folds (domain-warped noise,
+  stretched along one axis) drifts very slowly. It is lit the way pile fabric
+  is lit: nearly black where it faces you, glowing oxblood on its slopes
+  (`pow(1 - n.z, 1.4)`), with fine streaks along the nap. It stays dark so
+  the type is always crisp. Scroll shifts the folds (`uShift`).
+- **Brushing the nap.** A small grid on the CPU (`light` and `dark`, 96 cells
+  wide, 56 on phones) records where the pile has been stroked. Moving with
+  the nap adds to `light` (the pile lies flat and shines), against it adds to
+  `dark` (it stands up and drinks the light). Both decay with a time constant
+  of 0.75s, so a stroke is mostly gone in about two seconds. The grid is
+  uploaded as a tiny texture only while a stroke is alive.
+- Cursor on desktop; finger drag on touch (`touchmove` on the stage, passive,
+  so scrolling is untouched).
+- Half resolution (0.45 on phones), 4 noise octaves (3 on phones), async
+  shader compile, loop stops off screen. Reduced motion: one still frame.
+- Before the shader is ready, and without WebGL, the stage shows a dark
+  oxblood gradient.
+- The word reveal ends exactly where the pillars begin to fall. If the bridge
+  height or its negative margin changes, change the reveal's `end` with it.
 
 ### Phones (under 1024 wide; the block in `globals.css` starts at 820)
 
@@ -206,25 +237,34 @@ must not be changed to fix a phone problem; use the phone block.
   (`SmoothScroll.tsx`). Native scrolling is left alone.
 - **Hero.** Main-thread engine in WebKit, letters open wider when lit, cue at
   15px.
-- **Manifesto.** Type up to 20vw, balanced into short lines, five threads.
+- **Manifesto.** Type up to 20vw, balanced into short lines. Lighter velvet
+  shader; a finger drag brushes it.
 - **Editorial.** One column per step: numeral, heading and text, then the
   plate cropped to 5:4.
 - **Corridor.** The portrait tunnel described above; the frame is 80vw.
 - **Dimension.** Knot in the upper three quarters, words below, lifted clear
   of Safari's toolbar with `calc(100lvh - 100svh + 30px)`.
 - **Brutal.** One column, full-width button.
-- **Finale.** Words up to 56vw so they fill the width, seven tiles on a
+- **Finale.** Words sized per line so each fills the width, seven tiles on a
   tighter orbit.
 - **Footer.** Full-width button, links padded to at least 44px tall.
 - Pixel ratio is capped (2 for the 2D canvases, 1.5 for three.js).
 
 ### Finale
 
-Plain CSS 3D, no WebGL. The words sit at depth zero inside a
+Plain CSS 3D, no WebGL. The words are MAKE / IT / YOURS. (not the reference site's phrase; do not
+change them back). They sit at depth zero inside a
 `transform-style: preserve-3d` space and the tiles are moved with
 `translate3d`, so the browser sorts what is in front and what is behind.
 `Finale.tsx` projects each tile to the screen itself and toggles `.is-hit` on
 any letter it covers (inverted block plus a colour split).
+
+### Footer tracers
+
+Twelve marks trail the cursor in `Footer.tsx`: high-stakes table symbols,
+drawn here as plain SVG shapes (never emoji or font glyphs). Four suits, poker
+chips and dice faces, in bone, oxblood and the signal orange, each with its own
+size. On touch screens they wander on their own and follow a finger drag.
 
 ## How motion is switched on
 

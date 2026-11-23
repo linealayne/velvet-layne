@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { gsap, ScrollTrigger, scrollState, useStage, motionOn, isSmall, isCoarse } from "@/lib/gsap";
+import { gsap, ScrollTrigger, useStage, motionOn, isSmall } from "@/lib/gsap";
 
 const LINES = [
   "Design is a decision made visible.",
@@ -10,272 +10,341 @@ const LINES = [
   "One idea, built all the way through.",
 ];
 
-const TAU = Math.PI * 2;
-const frac = (v: number) => v - Math.floor(v);
-const rnd = (n: number) => frac(Math.sin(n * 91.7 + 13.3) * 43758.5453);
-
-const POINTS = 150; // samples along each thread
-
-type Thread = {
-  /** Depth, 0.35 (far) to 1 (near): drives weight, opacity and parallax. */
-  z: number;
-  cx: number;
-  cy: number;
-  // Two harmonics per axis. Frequency pairs like 1:2 make figure-eights,
-  // 2:3 makes loose loops, 1:1 with a phase gap makes a long S.
-  ax: number;
-  bx: number;
-  ay: number;
-  by: number;
-  fx: number;
-  gx: number;
-  fy: number;
-  gy: number;
-  p: number[];
-  w: number[];
-  pulse: number;
-  /** Per-point push away from the cursor, eased so it settles with a delay. */
-  dx: Float32Array;
-  dy: Float32Array;
-  x: Float32Array;
-  y: Float32Array;
-};
-
-function makeThread(i: number, n: number): Thread {
-  const pairs = [
-    [1, 2, 2, 1],
-    [1, 1.5, 1.5, 0.5],
-    [0.5, 1.5, 1, 2],
-    [1, 3, 2, 1],
-    [0.5, 1, 1, 1.5],
-    [1.5, 0.5, 1, 2.5],
-    [1, 2.5, 0.5, 1.5],
-  ][i % 7];
-  return {
-    z: 0.35 + 0.65 * (i / Math.max(1, n - 1)),
-    cx: 0.14 + 0.72 * rnd(i + 1),
-    cy: 0.16 + 0.68 * rnd(i + 11),
-    ax: 0.2 + 0.2 * rnd(i + 21),
-    bx: 0.05 + 0.1 * rnd(i + 31),
-    ay: 0.16 + 0.18 * rnd(i + 41),
-    by: 0.05 + 0.1 * rnd(i + 51),
-    fx: pairs[0],
-    gx: pairs[1],
-    fy: pairs[2],
-    gy: pairs[3],
-    p: [rnd(i + 61) * TAU, rnd(i + 71) * TAU, rnd(i + 81) * TAU, rnd(i + 91) * TAU],
-    w: [
-      0.05 + rnd(i + 101) * 0.05,
-      0.035 + rnd(i + 111) * 0.05,
-      0.045 + rnd(i + 121) * 0.05,
-      0.03 + rnd(i + 131) * 0.05,
-    ],
-    pulse: rnd(i + 141),
-    dx: new Float32Array(POINTS),
-    dy: new Float32Array(POINTS),
-    x: new Float32Array(POINTS),
-    y: new Float32Array(POINTS),
-  };
-}
+const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
 
 /**
- * Chapter 2. Mostly black. A handful of hairline oxblood threads hang in the
- * space at different depths, each wandering through loose loops and S-curves.
- * They are simply there, always drifting: nothing ever draws itself on. Now
- * and then a faint brighter pulse travels along one. The cursor parts the
- * threads near it and they settle back slowly; on touch screens they sway
- * lightly with the scroll instead. Dust hangs at three depths.
- * The manifesto lights up word by word as you scroll.
+ * Velvet. A heightfield of slow, deep folds is lit the way pile fabric is lit:
+ * nearly black where it faces you, glowing oxblood where it turns away. The
+ * brush texture says where the nap has been stroked and which way.
+ */
+const frag = (octaves: number) => `
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime;
+uniform float uShift;
+uniform sampler2D uBrush;
+
+float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float noise(vec2 p){
+  vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+  return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);
+}
+float fbm(vec2 p){
+  float a=.5,v=0.;
+  for(int i=0;i<${octaves};i++){v+=a*noise(p);p=mat2(1.6,1.2,-1.2,1.6)*p;a*=.5;}
+  return v;
+}
+// Heavy cloth: long folds leaning across the frame, drifting very slowly.
+float cloth(vec2 p){
+  vec2 q=mat2(.82,-.57,.57,.82)*p;
+  q=vec2(q.x*1.35,q.y*.42);
+  float w=fbm(q*.8+vec2(uTime*.011,-uTime*.007)+uShift*.35);
+  return fbm(q+vec2(w*1.5,w*.4)+vec2(-uTime*.006,uTime*.009+uShift*.5));
+}
+void main(){
+  vec2 uv=gl_FragCoord.xy/uRes;
+  float mn=min(uRes.x,uRes.y);
+  vec2 p=(gl_FragCoord.xy-.5*uRes)/mn;
+  float e=.03;
+  float h=cloth(p);
+  vec3 n=normalize(vec3((h-cloth(p+vec2(e,0.)))/e*1.5,(h-cloth(p+vec2(0.,e)))/e*1.5,1.));
+  float diff=max(dot(n,normalize(vec3(-.45,.55,.7))),0.);
+  // Pile catches light at grazing angles, so the folds glow on their slopes.
+  float sheen=pow(1.-n.z,1.4);
+
+  vec3 deep=vec3(.03,.003,.008);
+  vec3 body=vec3(.2,.012,.035);
+  vec3 lit=vec3(.5,.05,.09);
+  vec3 col=mix(deep,body,smoothstep(0.,.9,diff*.5+sheen*1.6));
+  col+=lit*sheen*sheen*.85;
+
+  // The pile itself: fine streaks lying along the nap.
+  float pile=noise(vec2(gl_FragCoord.x*.55+h*40.,gl_FragCoord.y*.09));
+  col*=.82+.3*pile;
+
+  // Brushed nap: stroked one way it turns lighter, the other way darker.
+  vec4 b=texture2D(uBrush,uv);
+  float brush=b.r-b.g;
+  float up=max(brush,0.),down=max(-brush,0.);
+  // Stroked with the nap the pile lies flat and shines; against it, it stands
+  // up and drinks the light.
+  up*=.65+.7*pile;
+  col=mix(col,col*2.4+lit*.3,up);
+  col=mix(col,col*.2,down);
+
+  col*=.55+.45*smoothstep(1.25,.25,length(p));
+  gl_FragColor=vec4(col,1.);
+}`;
+
+/**
+ * Chapter 2. A full screen of very dark oxblood velvet. Its folds breathe and
+ * drift on their own. Moving the cursor across it brushes the nap: the pile
+ * turns lighter or darker along the stroke, then recovers over a couple of
+ * seconds. A finger drag does the same on touch screens, and scrolling shifts
+ * the folds. The manifesto lights up word by word as you scroll.
  */
 export default function Manifesto() {
   const root = useRef<HTMLElement>(null);
 
   useStage(() => {
     const el = root.current!;
+    const stage = el.querySelector<HTMLElement>(".mf-stage")!;
     const canvas = el.querySelector<HTMLCanvasElement>(".mf-canvas")!;
-    const ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) return;
     const moving = motionOn();
     const small = isSmall();
-    const coarse = isCoarse();
-    // Hairlines want real pixels. A few thin paths are cheap even at 2x.
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const COUNT = small ? 5 : 7;
-    const DUST = small ? 34 : 64;
-    const threads = Array.from({ length: COUNT }, (_, i) => makeThread(i, COUNT));
-    let w = 0;
-    let h = 0;
-    let progress = 0;
-    // Cursor in canvas pixels, far away until it first moves.
-    let mx = -9999;
-    let my = -9999;
-    let sway = 0;
+    const cleanups: (() => void)[] = [];
+    let disposed = false;
 
-    const draw = (t: number) => {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = "#060304";
-      ctx.fillRect(0, 0, w, h);
-      const unit = Math.max(w, h);
-      // Touch: the scroll leans the threads a little, and lets go slowly.
-      sway += ((coarse ? gsap.utils.clamp(-1, 1, scrollState.velocity / 2400) : 0) - sway) * 0.05;
-      const reach = Math.min(190, unit * 0.16);
+    /* ── Words light up with scroll. The reveal ends exactly where the
+          pillars of the next transition begin to fall: no dead scroll. ── */
+    if (moving) {
+      const words = gsap.utils.toArray<HTMLElement>(".mf-word", el);
+      gsap
+        .timeline({
+          defaults: { ease: "none" },
+          scrollTrigger: {
+            trigger: el,
+            start: "top 35%",
+            end: () => `bottom ${small ? 170 : 190}%`,
+            scrub: 0.5,
+          },
+        })
+        .fromTo(
+          words,
+          { opacity: 0.1, yPercent: 18 },
+          { opacity: 1, yPercent: 0, duration: 0.12, stagger: 0.035, ease: "power2.out" }
+        );
+    }
 
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      for (const th of threads) {
-        const ox = th.cx * w;
-        const oy = th.cy * h - (progress - 0.5) * h * 0.22 * th.z;
-        for (let k = 0; k < POINTS; k++) {
-          const s = k / (POINTS - 1);
-          const a = s * TAU;
-          let x =
-            ox +
-            Math.sin(a * th.fx + th.p[0] + t * th.w[0]) * th.ax * unit +
-            Math.sin(a * th.gx + th.p[1] - t * th.w[1]) * th.bx * unit;
-          let y =
-            oy +
-            Math.cos(a * th.fy + th.p[2] + t * th.w[2]) * th.ay * unit +
-            Math.sin(a * th.gy + th.p[3] - t * th.w[3]) * th.by * unit;
-          y += sway * 26 * th.z * Math.sin(s * Math.PI);
-          // Part around the cursor. The push is eased, so threads give way
-          // softly and take a moment to settle once the cursor has gone.
-          const vx = x - mx;
-          const vy = y - my;
-          const d = Math.hypot(vx, vy);
-          let tx = 0;
-          let ty = 0;
-          if (d < reach && d > 0.001) {
-            const f = (1 - d / reach) ** 2 * 30 * th.z;
-            tx = (vx / d) * f;
-            ty = (vy / d) * f;
-          }
-          th.dx[k] += (tx - th.dx[k]) * 0.07;
-          th.dy[k] += (ty - th.dy[k]) * 0.07;
-          x += th.dx[k];
-          y += th.dy[k];
-          th.x[k] = x;
-          th.y[k] = y;
-        }
-        const path = (from: number, to: number) => {
-          ctx.beginPath();
-          ctx.moveTo(th.x[from], th.y[from]);
-          for (let k = from + 1; k <= to; k++) ctx.lineTo(th.x[k], th.y[k]);
-          ctx.stroke();
-        };
-        // The thread itself: hairline, low.
-        ctx.lineWidth = 0.55 + th.z * 0.55;
-        ctx.strokeStyle = `rgba(158,18,34,${(0.24 + th.z * 0.3).toFixed(3)})`;
-        path(0, POINTS - 1);
-        // An occasional brighter segment travelling along it.
-        const cycle = frac(t * (0.018 + th.z * 0.012) + th.pulse);
-        if (cycle < 0.55) {
-          const head = (cycle / 0.55) * (POINTS + 30) - 15;
-          const fade = Math.sin((cycle / 0.55) * Math.PI);
-          for (const [len, alpha] of [
-            [22, 0.16],
-            [12, 0.26],
-            [5, 0.42],
-          ]) {
-            const from = Math.max(0, Math.round(head - len));
-            const to = Math.min(POINTS - 1, Math.round(head + len));
-            if (to - from < 2) continue;
-            ctx.strokeStyle = `rgba(236,58,58,${(alpha * fade * (0.5 + th.z * 0.5)).toFixed(3)})`;
-            path(from, to);
-          }
+    /* ── The velvet ── */
+    const gl = canvas.getContext("webgl", { antialias: false, alpha: false, powerPreference: "high-performance" });
+    if (!gl) {
+      canvas.style.display = "none";
+      return;
+    }
+    const make = (type: number, src: string) => {
+      const s = gl.createShader(type)!;
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    };
+    const prog = gl.createProgram()!;
+    gl.attachShader(prog, make(gl.VERTEX_SHADER, VERT));
+    gl.attachShader(prog, make(gl.FRAGMENT_SHADER, frag(small ? 3 : 4)));
+    gl.linkProgram(prog);
+
+    // The brush map: a small grid of how much the nap has been stroked, with
+    // the nap (light) and against it (dark). It lives on the CPU and is
+    // uploaded as a tiny texture, so it costs next to nothing.
+    const GW = small ? 56 : 96;
+    let GH = 54;
+    let light = new Float32Array(GW * GH);
+    let dark = new Float32Array(GW * GH);
+    let bytes = new Uint8Array(GW * GH * 4);
+    let dirty = false;
+    const stamp = (x: number, y: number, withNap: boolean, amount: number) => {
+      const cx = x * GW;
+      const cy = (1 - y) * GH;
+      const R = small ? 2.8 : 3.3;
+      const field = withNap ? light : dark;
+      const other = withNap ? dark : light;
+      for (let j = Math.max(0, Math.floor(cy - R)); j <= Math.min(GH - 1, Math.ceil(cy + R)); j++) {
+        for (let i = Math.max(0, Math.floor(cx - R)); i <= Math.min(GW - 1, Math.ceil(cx + R)); i++) {
+          const d = Math.hypot(i - cx, j - cy) / R;
+          if (d >= 1) continue;
+          const f = (1 - d * d) ** 2 * amount;
+          const k = j * GW + i;
+          field[k] = Math.min(1, field[k] + f);
+          other[k] *= 1 - f;
         }
       }
-
-      // Dust at three depths: nearer motes are bigger, brighter and move more.
-      for (let i = 0; i < DUST; i++) {
-        const depth = 0.25 + (i % 3) * 0.375;
-        const x = frac(rnd(i) + t * 0.004 * depth) * (w + 40) - 20;
-        const y = frac(rnd(i + 50) - t * 0.006 * depth - progress * 0.55 * depth) * (h + 40) - 20;
-        const size = 0.7 + depth * 1.9 * (0.6 + rnd(i + 80) * 0.6);
-        const twinkle = 0.75 + 0.25 * Math.sin(t * 0.8 + i);
-        ctx.fillStyle = `rgba(239,228,208,${(0.1 + depth * 0.4) * twinkle})`;
-        ctx.beginPath();
-        ctx.arc(x, y, size / 2, 0, TAU);
-        ctx.fill();
-      }
+      dirty = true;
     };
-
-    const resize = () => {
-      w = canvas.clientWidth;
-      h = canvas.clientHeight;
-      if (!w || !h) return;
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-      if (!moving) draw(40);
-    };
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
-    resize();
-    if (!moving) return () => ro.disconnect();
-
-    // Words light up with scroll.
-    const words = gsap.utils.toArray<HTMLElement>(".mf-word", el);
-    gsap
-      .timeline({
-        defaults: { ease: "none" },
-        scrollTrigger: { trigger: el, start: "top 35%", end: "bottom bottom", scrub: 0.5 },
-      })
-      .fromTo(
-        words,
-        { opacity: 0.1, yPercent: 18 },
-        { opacity: 1, yPercent: 0, duration: 0.12, stagger: 0.035, ease: "power2.out" }
-      )
-      .to({}, { duration: 0.16 });
-
-    // Fade the stage out at the very end so the seam into the bridge is black on black.
-    gsap.to([canvas, el.querySelector(".mf-lines")], {
-      opacity: 0,
-      ease: "none",
-      scrollTrigger: { trigger: el, start: "bottom 145%", end: "bottom 104%", scrub: true },
-    });
-
-    let id = 0;
-    let running = false;
-    const t0 = performance.now();
-    const loop = (now: number) => {
-      draw((now - t0) / 1000 + 40);
-      id = requestAnimationFrame(loop);
-    };
-    const run = (on: boolean) => {
-      if (on === running) return;
-      running = on;
-      cancelAnimationFrame(id);
-      if (on) id = requestAnimationFrame(loop);
-    };
-    const st = ScrollTrigger.create({
-      trigger: el,
-      start: "top bottom",
-      end: "bottom top",
-      onUpdate: (self) => (progress = self.progress),
-      onToggle: (self) => run(self.isActive && !document.hidden),
-    });
-    run(st.isActive);
-    const onVis = () => run(st.isActive && !document.hidden);
-    document.addEventListener("visibilitychange", onVis);
-    const onMove = (e: PointerEvent) => {
-      if (e.pointerType === "touch") return;
+    let lastX = -1;
+    let lastY = -1;
+    const stroke = (clientX: number, clientY: number) => {
       const r = canvas.getBoundingClientRect();
-      mx = e.clientX - r.left;
-      my = e.clientY - r.top;
+      const x = (clientX - r.left) / r.width;
+      const y = (clientY - r.top) / r.height;
+      if (x < 0 || x > 1 || y < 0 || y > 1) {
+        lastX = -1;
+        return;
+      }
+      if (lastX >= 0) {
+        const dx = x - lastX;
+        const dy = y - lastY;
+        const dist = Math.hypot(dx * GW, dy * GH);
+        if (dist > 0.2 && dist < GW * 0.5) {
+          // Which way is the pile being pushed, relative to how it lies?
+          const withNap = dx * 0.86 - dy * 0.5 > 0;
+          const steps = Math.min(24, Math.ceil(dist / 1.3));
+          for (let s = 1; s <= steps; s++) {
+            stamp(lastX + (dx * s) / steps, lastY + (dy * s) / steps, withNap, 0.24);
+          }
+        }
+      }
+      lastX = x;
+      lastY = y;
     };
-    const onLeave = () => {
-      mx = -9999;
-      my = -9999;
-    };
-    window.addEventListener("pointermove", onMove, { passive: true });
-    document.documentElement.addEventListener("pointerleave", onLeave);
 
-    return () => {
-      run(false);
-      ro.disconnect();
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("pointermove", onMove);
-      document.documentElement.removeEventListener("pointerleave", onLeave);
+    let cleanupLoop = () => {};
+    const parallel = gl.getExtension("KHR_parallel_shader_compile");
+    let waitId = 0;
+    const wait = () => {
+      if (disposed) return;
+      if (parallel && !gl.getProgramParameter(prog, parallel.COMPLETION_STATUS_KHR)) {
+        waitId = requestAnimationFrame(wait);
+        return;
+      }
+      cleanupLoop = start();
     };
+
+    const start = () => {
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        canvas.style.display = "none";
+        return () => {};
+      }
+      gl.useProgram(prog);
+      gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(prog, "p");
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      const u = {
+        res: gl.getUniformLocation(prog, "uRes"),
+        time: gl.getUniformLocation(prog, "uTime"),
+        shift: gl.getUniformLocation(prog, "uShift"),
+        brush: gl.getUniformLocation(prog, "uBrush"),
+      };
+      const tex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const upload = () => {
+        for (let k = 0; k < light.length; k++) {
+          bytes[k * 4] = light[k] * 255;
+          bytes[k * 4 + 1] = dark[k] * 255;
+        }
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, GW, GH, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+      };
+      gl.uniform1i(u.brush, 0);
+
+      let progress = 0;
+      let shift = 0;
+      const draw = (seconds: number, dt: number) => {
+        if (dirty) {
+          // The pile springs back: a stroke is mostly gone after two seconds.
+          const keep = Math.exp(-dt / 0.75);
+          let any = false;
+          for (let k = 0; k < light.length; k++) {
+            light[k] *= keep;
+            dark[k] *= keep;
+            if (light[k] > 0.004 || dark[k] > 0.004) any = true;
+          }
+          dirty = any;
+          upload();
+        }
+        shift += (progress - shift) * 0.06;
+        gl.uniform2f(u.res, canvas.width, canvas.height);
+        gl.uniform1f(u.time, seconds);
+        gl.uniform1f(u.shift, shift);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+
+      const resize = () => {
+        if (!canvas.clientWidth) return;
+        // Soft cloth does not need full resolution: half is plenty.
+        const scale = small ? 0.45 : 0.5;
+        const w = Math.min(Math.round(canvas.clientWidth * scale), 1100);
+        const h = Math.round((w / canvas.clientWidth) * canvas.clientHeight);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+          gl.viewport(0, 0, w, h);
+          const gh = Math.max(24, Math.min(160, Math.round((GW * h) / w)));
+          if (gh !== GH) {
+            GH = gh;
+            light = new Float32Array(GW * GH);
+            dark = new Float32Array(GW * GH);
+            bytes = new Uint8Array(GW * GH * 4);
+          }
+          upload();
+        }
+        if (!moving) draw(30, 0);
+      };
+      resize();
+      const ro = new ResizeObserver(resize);
+      ro.observe(canvas);
+      canvas.classList.add("is-live");
+      if (!moving) return () => ro.disconnect();
+
+      let id = 0;
+      let running = false;
+      let last = 0;
+      const t0 = performance.now();
+      const loop = (now: number) => {
+        const dt = Math.min((now - last) / 1000, 0.05);
+        last = now;
+        draw((now - t0) / 1000 + 30, dt);
+        id = requestAnimationFrame(loop);
+      };
+      const run = (on: boolean) => {
+        if (on === running) return;
+        running = on;
+        cancelAnimationFrame(id);
+        if (on) {
+          last = performance.now();
+          id = requestAnimationFrame(loop);
+        }
+      };
+      const st = ScrollTrigger.create({
+        trigger: el,
+        start: "top bottom",
+        end: "bottom top",
+        onUpdate: (self) => (progress = self.progress),
+        onToggle: (self) => run(self.isActive && !document.hidden),
+      });
+      run(st.isActive);
+      const onVis = () => run(st.isActive && !document.hidden);
+      document.addEventListener("visibilitychange", onVis);
+
+      const onMove = (e: PointerEvent) => {
+        if (e.pointerType !== "touch") stroke(e.clientX, e.clientY);
+      };
+      const onTouch = (e: TouchEvent) => {
+        const t = e.touches[0];
+        if (t) stroke(t.clientX, t.clientY);
+      };
+      const lift = () => {
+        lastX = -1;
+      };
+      window.addEventListener("pointermove", onMove, { passive: true });
+      stage.addEventListener("touchstart", lift, { passive: true });
+      stage.addEventListener("touchmove", onTouch, { passive: true });
+      stage.addEventListener("touchend", lift, { passive: true });
+
+      return () => {
+        run(false);
+        st.kill();
+        ro.disconnect();
+        document.removeEventListener("visibilitychange", onVis);
+        window.removeEventListener("pointermove", onMove);
+        stage.removeEventListener("touchstart", lift);
+        stage.removeEventListener("touchmove", onTouch);
+        stage.removeEventListener("touchend", lift);
+      };
+    };
+    wait();
+    cleanups.push(() => {
+      disposed = true;
+      cancelAnimationFrame(waitId);
+      cleanupLoop();
+    });
+
+    return () => cleanups.forEach((fn) => fn());
   }, root);
 
   return (

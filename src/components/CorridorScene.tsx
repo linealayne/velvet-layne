@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import {
   BufferGeometry,
   CanvasTexture,
+  DoubleSide,
   Float32BufferAttribute,
   Fog,
   Group,
@@ -13,12 +14,14 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   PlaneGeometry,
+  RepeatWrapping,
   Scene,
   SRGBColorSpace,
   WebGLRenderer,
 } from "three";
 import { ScrollTrigger, scrollState, calm, motionOn, isSmall } from "@/lib/gsap";
 import { preloadCorridor } from "@/lib/corridorAssets";
+import { corridorState, entranceLight, FOG_FAR, FOG_NEAR } from "@/lib/corridorState";
 
 const LENGTH = 52; // how far the tunnel runs before a panel wraps
 const BASE_SPEED = 6.5; // units per second, always
@@ -75,7 +78,8 @@ export default function CorridorScene() {
       host.appendChild(renderer.domElement);
 
       const scene = new Scene();
-      scene.fog = new Fog(0x000000, 5, LENGTH - 8);
+      const fog = new Fog(0x000000, FOG_NEAR, FOG_FAR);
+      scene.fog = fog;
       const camera = new PerspectiveCamera(62, 1, 0.1, LENGTH + 10);
       const unit = new PlaneGeometry(1, 1);
       cleanups.push(() => unit.dispose());
@@ -87,11 +91,14 @@ export default function CorridorScene() {
       // Texture pool. Posters are portrait, captures are landscape. Every
       // texture is uploaded to the GPU now, not when a panel first shows it.
       const fades: MeshBasicMaterial[] = [];
+      const pool: MeshBasicMaterial[] = [];
       const material = (canvas: HTMLCanvasElement) => {
         const tex = new CanvasTexture(canvas);
         tex.colorSpace = SRGBColorSpace;
         tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
         const mat = new MeshBasicMaterial({ map: tex, toneMapped: false });
+        mat.userData.fade = 1;
+        pool.push(mat);
         renderer.initTexture(tex);
         cleanups.push(() => {
           tex.dispose();
@@ -108,7 +115,7 @@ export default function CorridorScene() {
             if (disposed || !mat.map) return;
             mat.map.needsUpdate = true;
             renderer.initTexture(mat.map);
-            mat.color.setScalar(0.25);
+            mat.userData.fade = 0.25;
             fades.push(mat);
           });
         }
@@ -127,6 +134,78 @@ export default function CorridorScene() {
         const pool = shape === "land" ? land : port;
         return pool[counter++ % pool.length];
       };
+
+      // The entrance. Editorial's page is pulled down the tunnel, and these are
+      // the walls it leaves behind: four tan surfaces just outside the panels,
+      // streaked along their length as if the paper had been dragged. They
+      // take the scene's fog, so they darken with distance, and go fully
+      // black as the entrance completes. See Corridor.tsx.
+      const skinTex = (() => {
+        const c = document.createElement("canvas");
+        c.width = 64;
+        c.height = 512;
+        const g = c.getContext("2d")!;
+        g.fillStyle = "#dccdb0";
+        g.fillRect(0, 0, 64, 512);
+        const rnd = (n: number) => {
+          const v = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+          return v - Math.floor(v);
+        };
+        // Streaks run the length of the tunnel (across this texture's width).
+        for (let i = 0; i < 150; i++) {
+          const pick = rnd(i + 0.5);
+          g.fillStyle =
+            pick < 0.08
+              ? `rgba(196,0,29,${0.25 + rnd(i) * 0.3})`
+              : pick < 0.14
+                ? `rgba(255,77,0,${0.25 + rnd(i) * 0.3})`
+                : `rgba(10,7,7,${0.04 + rnd(i) * 0.2})`;
+          g.fillRect(0, rnd(i + 0.2) * 512, 64, 0.6 + rnd(i + 0.7) * 2.6);
+        }
+        const tex = new CanvasTexture(c);
+        tex.colorSpace = SRGBColorSpace;
+        tex.wrapS = RepeatWrapping;
+        renderer.initTexture(tex);
+        cleanups.push(() => tex.dispose());
+        return tex;
+      })();
+      const skinMat = new MeshBasicMaterial({ map: skinTex, toneMapped: false, side: DoubleSide });
+      cleanups.push(() => skinMat.dispose());
+      let skins: Mesh | null = null;
+      const buildSkins = (aspect: number) => {
+        if (skins) {
+          scene.remove(skins);
+          skins.geometry.dispose();
+        }
+        // A cross-section with exactly the screen's shape, so the page that
+        // recedes down it is a plain uniform scale of the screen.
+        const hs = Math.max(H, W / aspect) + 0.06;
+        const ws = hs * aspect;
+        corridorState.d0 = hs / 2 / Math.tan((baseFov * Math.PI) / 360);
+        const x = ws / 2;
+        const y = hs / 2;
+        const z0 = 2;
+        const z1 = -LENGTH;
+        const reps = (z0 - z1) / 9;
+        const pos: number[] = [];
+        const uv: number[] = [];
+        // Each wall is one quad: a and b are its two long edges.
+        const wall = (ax: number, ay: number, bx: number, by: number) => {
+          pos.push(ax, ay, z0, ax, ay, z1, bx, by, z1, ax, ay, z0, bx, by, z1, bx, by, z0);
+          uv.push(0, 0, reps, 0, reps, 1, 0, 0, reps, 1, 0, 1);
+        };
+        wall(-x, -y, x, -y); // floor
+        wall(x, y, -x, y); // ceiling
+        wall(-x, y, -x, -y); // left
+        wall(x, -y, x, y); // right
+        const geo = new BufferGeometry();
+        geo.setAttribute("position", new Float32BufferAttribute(pos, 3));
+        geo.setAttribute("uv", new Float32BufferAttribute(uv, 2));
+        skins = new Mesh(geo, skinMat);
+        skins.visible = false;
+        scene.add(skins);
+      };
+      cleanups.push(() => skins?.geometry.dispose());
 
       const layout = (aspect: number) => {
         panels.clear();
@@ -208,6 +287,7 @@ export default function CorridorScene() {
         camera.fov = baseFov;
         camera.updateProjectionMatrix();
         rails();
+        buildSkins(aspect);
       };
 
       // Structure: corner rails and ribs, so the depth reads even between panels.
@@ -235,6 +315,8 @@ export default function CorridorScene() {
       cleanups.push(() => ribs?.geometry.dispose());
 
       let zoff = 1.3;
+      let sway = 1;
+      let lit = 1;
       let speed = BASE_SPEED;
       const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
       const mod = (a: number, n: number) => ((a % n) + n) % n;
@@ -255,15 +337,37 @@ export default function CorridorScene() {
         if (ribs) ribs.position.z = -mod(zoff, RIB);
         // Captures that just arrived fade up from dim.
         for (let i = fades.length - 1; i >= 0; i--) {
-          const c = Math.min(1, fades[i].color.r + Math.max(dt, 0.016) * 3.2);
-          fades[i].color.setScalar(c);
+          const c = Math.min(1, fades[i].userData.fade + Math.max(dt, 0.016) * 3.2);
+          fades[i].userData.fade = c;
           if (c >= 1) fades.splice(i, 1);
+        }
+        // During the entrance the camera holds dead still, so the page being
+        // pulled in (a DOM layer) stays welded to these walls.
+        const vac = moving ? corridorState.vac : 1;
+        const inside = vac >= 1 ? 1 : 0;
+        const el = entranceLight(vac);
+        fog.near = el.near;
+        fog.far = el.far;
+        // While the walls are still paper there are no panels: they come up
+        // out of the dark once the page has gone.
+        if (el.light !== lit || fades.length) {
+          lit = el.light;
+          for (const m of pool) m.color.setScalar(lit * m.userData.fade);
+          lineMat.opacity = 0.2 * lit;
+        }
+        panels.visible = lit > 0.001;
+        if (ribs) ribs.visible = panels.visible;
+        if (skins) {
+          skins.visible = el.paper > 0;
+          // The streaks rush inward as the page goes.
+          if (skins.visible) skinTex.offset.x = -Math.pow(vac, 1.55) * 3;
         }
         pointer.x += (pointer.tx - pointer.x) * 0.05;
         pointer.y += (pointer.ty - pointer.y) * 0.05;
-        camera.rotation.y = -pointer.x * 0.07;
-        camera.rotation.x = -pointer.y * 0.045;
-        const fov = baseFov + Math.min(12, Math.abs(speed - BASE_SPEED) * 0.45);
+        sway += (inside - sway) * 0.06;
+        camera.rotation.y = -pointer.x * 0.07 * sway;
+        camera.rotation.x = -pointer.y * 0.045 * sway;
+        const fov = baseFov + Math.min(12, Math.abs(speed - BASE_SPEED) * 0.45) * sway;
         if (Math.abs(fov - camera.fov) > 0.05) {
           camera.fov = fov;
           camera.updateProjectionMatrix();

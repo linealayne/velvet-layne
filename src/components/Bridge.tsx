@@ -73,6 +73,9 @@ export default function Bridge({ variant }: { variant: BridgeVariant }) {
         0
       );
     } else if (variant === "iris") {
+      // This bridge overlaps the end of the Corridor so there is no black gap
+      // before the dot appears. Its backdrop only exists once it has taken over.
+      tl.fromTo(q(".b-from"), { opacity: 0 }, { opacity: 1, duration: 0.01 }, 0);
       tl.fromTo(q(".iris-red"), { "--r": 0 }, { "--r": 78, duration: 0.5, ease: "power2.in" }, 0.04).fromTo(
         q(".b-to"),
         { "--r": 0 },

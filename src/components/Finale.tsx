@@ -5,13 +5,13 @@ import { ScrollTrigger, scrollState, useStage, motionOn, isSmall } from "@/lib/g
 import { makePoster, postersReady, POSTER_W, POSTER_H } from "@/lib/posters";
 import { sceneStill } from "@/lib/scenes";
 
-const WORDS = ["SEE", "YOU", "SOON"];
+const WORDS = ["MAKE", "IT", "YOURS."];
 // Letter scenes that are plain 2D drawings and can be frozen into a tile.
 const STILLS = [0, 3, 6, 7, 9, 1, 10, 5, 4];
 const TAU = Math.PI * 2;
 
 /**
- * Chapter 7. SEE / YOU / SOON stand in the space while two rings of tiles
+ * Chapter 7. MAKE / IT / YOURS. stand in the space while two rings of tiles
  * (corridor posters and frames from the hero letters) orbit through it,
  * passing in front of the words and behind them. Wherever a tile crosses a
  * letter, that letter inverts and splits for as long as the tile is on it.
@@ -168,7 +168,7 @@ export default function Finale() {
       <div className="fin-stage">
         <div className="fin-space">
           <h2 className="sys">
-            <span className="sr-only">See you soon</span>
+            <span className="sr-only">Make it yours.</span>
             {WORDS.map((word) => (
               <span key={word} className="sys-word" aria-hidden="true">
                 {word.split("").map((c, i) => (
