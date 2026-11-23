@@ -127,7 +127,7 @@ for (const run of RUNS) {
     await shoot("entrance-2-pulling");
     await go(".corridor", 0.125, "through", 1500);
     await shoot("entrance-3-darkening");
-    await go(".corridor", 0.3, "through", 1700);
+    await go(".corridor", 0.32, "through", 3200);
     await shoot("entrance-4-inside");
 
     /* The Corridor into the iris, no black gap */
