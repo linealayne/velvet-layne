@@ -5,8 +5,8 @@
  * Corridor's own three.js scene and renderer, and every part of it is a pure
  * function of one number, `v` (0 to 1, the entrance; see Corridor.tsx):
  *
- *   0.00-0.24  crumple   the page folds up, soft as cloth, into a ball
- *   0.15-0.34  pull back the camera draws back and the room is there
+ *   0.00-0.21  crumple   the page is crumpled, as paper, into a ball
+ *   0.19-0.34  pull back the lights come up, the camera draws back: a room
  *   0.33       the toss  the ball is thrown: wall, bounce, rim, bin
  *   0.40-0.90  shake     lamp, frames and dust tremble (only while scrolled)
  *   0.54-0.86  suction   the wall leaves brick by brick, then the floor
@@ -35,6 +35,7 @@ import {
   Group,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
+  IcosahedronGeometry,
   LatheGeometry,
   Material,
   Mesh,
@@ -55,6 +56,7 @@ import {
   TorusGeometry,
   Vector2,
   Vector3,
+  Vector4,
   ZeroFactor,
   type WebGLProgramParametersWithUniforms,
   type WebGLRenderer,
@@ -70,8 +72,10 @@ const VANISH_Z = -64;
 
 /* The beats, in v. */
 export const T = {
-  crumple: [0, 0.24],
-  camera: [0.15, 0.34],
+  crumple: [0, 0.21],
+  /** The room is dark, and not drawn at all, until this. */
+  reveal: [0.19, 0.31],
+  camera: [0.2, 0.34],
   toss: 0.33,
   shake: [0.4, 0.5, 0.8, 0.92],
   pull: [0.54, 0.86],
@@ -120,13 +124,16 @@ const TONED = "gl_FragColor.rgb = studioTone(gl_FragColor.rgb);";
 export const DEPTH_RANGE = 40;
 
 type Shader = WebGLProgramParametersWithUniforms;
+/** The room's exposure: 0 while the page is being crumpled (the room is dark), 1 once revealed. */
 const exposure = { value: 1 };
+/** The paper's own: it is lit from the start. */
+const paperExposure = { value: 1 };
 
-function film<M extends Material>(mat: M, key: string, extra?: (sh: Shader) => void): M {
+function film<M extends Material>(mat: M, key: string, extra?: (sh: Shader) => void, expo = exposure): M {
   mat.toneMapped = false;
   (mat as unknown as { fog: boolean }).fog = false;
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uExposure = exposure;
+    sh.uniforms.uExposure = expo;
     sh.fragmentShader = sh.fragmentShader
       .replace("#include <common>", "#include <common>\n" + TONE)
       .replace("#include <tonemapping_fragment>", TONED)
@@ -199,41 +206,80 @@ function brushed() {
 
 /* ───────── The paper ───────── */
 
+/**
+ * How the page is crumpled. It is paper, so it is never bent or stretched:
+ * it is only ever FOLDED, along straight lines.
+ *
+ * The sheet sits inside a cage of FOLDS planes that closes in on it from all
+ * round. Whatever part of the sheet is outside a plane is mirrored back
+ * through it. A mirror is a rigid move and the points on the plane stay
+ * where they are, so each plane leaves a perfectly straight crease, the
+ * pieces on either side stay perfectly flat, and no part of the sheet changes
+ * size. The planes reach the corners and edges first, so those fold in first;
+ * as the cage shrinks the creases multiply, and when it has closed to the
+ * size of a fist the sheet is a tight wad of flat facets. Two passes over the
+ * planes are enough to bring every point inside (checked offline).
+ *
+ * Before that, a few shallow straight ridges buckle up across the sheet, the
+ * way paper gives under the first squeeze.
+ *
+ * At uC = 0 every plane is beyond the sheet: it is exactly the flat page.
+ * Facet normals are not computed here at all: the material is flat-shaded.
+ */
+export const FOLDS = 24;
+const RIDGES = 9;
 const PAPER_VERT = /* glsl */ `
-uniform float uC;
 uniform vec2 uPage;
 uniform float uR;
-float h31(vec3 p){p=fract(p*.3183099+.1);p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
-float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.-2.*f);
-  return mix(mix(mix(h31(i),h31(i+vec3(1.,0.,0.)),f.x),mix(h31(i+vec3(0.,1.,0.)),h31(i+vec3(1.,1.,0.)),f.x),f.y),
-             mix(mix(h31(i+vec3(0.,0.,1.)),h31(i+vec3(1.,0.,1.)),f.x),mix(h31(i+vec3(0.,1.,1.)),h31(i+vec3(1.,1.,1.)),f.x),f.y),f.z);}
-// Folds: creases with rounded shoulders, at three sizes, that shift as the
-// sheet closes, so the wrinkles ripple instead of just growing.
-float folds(vec2 uv){
-  vec3 p=vec3(uv*vec2(uPage.x/uPage.y,1.)*5.,uC*1.25);
-  float a=n3(p),b=n3(p*2.1+7.3),c=n3(p*4.3+3.1),d=n3(p*8.7+5.9);
-  float r1=1.-sqrt((2.*a-1.)*(2.*a-1.)+.02);
-  float r2=1.-sqrt((2.*b-1.)*(2.*b-1.)+.03);
-  float r3=1.-sqrt((2.*c-1.)*(2.*c-1.)+.05);
-  return r1*.55+r2*.3+r3*.16+d*.07-.55;
+uniform float uEps;
+uniform vec4 uFold[${FOLDS}];
+uniform vec4 uRidge[${RIDGES}];
+uniform vec3 uRidgeA[${RIDGES}];
+varying float vCore;
+// The grid cannot follow a crease exactly: a triangle that straddles one
+// would cut the corner, and a row of them makes a sawtooth. So the vertices
+// within a hair (e, half a grid cell) of a crease are gathered onto it, and
+// the next hair is stretched to make up. x is the distance to the crease.
+float gather(float x,float e){
+  float a=abs(x);
+  return sign(x)*max(0.,min(a,2.*(a-e)));
 }
-// Where a point of the page is, uC of the way from a flat sheet to a ball.
 vec3 crumple(vec2 uv){
-  vec2 q=(uv-.5)*uPage;
-  float rr=length(q);
-  float rmax=length(uPage)*.5;
-  vec2 dir=rr>1e-5?q/rr:vec2(1.,0.);
-  // gather: the sheet is wrapped round a ball, edges meeting at the back
-  float g=smoothstep(.08,1.,uC);
-  float rn=mix(rr/rmax,max(abs(q.x)/(uPage.x*.5),abs(q.y)/(uPage.y*.5)),.5);
-  float phi=3.14159*pow(rn,.8)*g;
-  float rho=mix(rr/max(phi,1e-4),uR*(1.-.2*rn*rn),g*g*g);
-  vec3 nrm=vec3(dir*sin(phi),cos(phi));
-  vec3 p=vec3(dir*sin(phi)*rho,(cos(phi)-1.)*rho+uR*g*g*g);
-  // wrinkle first, while it is still nearly flat; then the lumps of a ball
-  float w1=smoothstep(0.,.3,uC);
-  float amp=mix(uPage.y*.085*w1,uR*.46,g*g);
-  p+=nrm*folds(uv)*amp;
+  // (a hair over the screen, so no edge pixel can be left uncovered)
+  vec3 p=vec3((uv-.5)*uPage*1.004,0.);
+  // The first buckles: straight ridges. Vertices are gathered onto each
+  // ridge's crest and its two feet, within the plane of the sheet.
+  vec2 grad=vec2(0.);
+  for(int j=0;j<${RIDGES};j++){
+    vec4 r=uRidge[j];
+    vec3 a=uRidgeA[j];
+    float d=dot(p.xy-r.xy,r.zw);
+    float d1=gather(d,a.z);
+    float d2=sign(d1)*(a.y+gather(abs(d1)-a.y,a.z));
+    p.xy+=r.zw*(d2-d);
+    if(abs(d2)<a.y){
+      p.z+=a.x*(a.y-abs(d2));
+      grad-=a.x*sign(d2)*r.zw;
+    }
+  }
+  // N is the normal of the facet this vertex is on. It is carried through
+  // the folds so that a vertex can be slid to a crease WITHIN its own facet,
+  // which keeps every facet a true plane.
+  vec3 N=normalize(vec3(-grad,1.));
+  for(int s=0;s<2;s++){
+    for(int k=0;k<${FOLDS};k++){
+      vec4 f=uFold[k];
+      float o=dot(p,f.xyz)-f.w;
+      float cn=dot(f.xyz,N);
+      float g=gather(o,uEps);
+      p+=(f.xyz-cn*N)*((g-o)/max(1.-cn*cn,.04));
+      if(g>0.){
+        // outside the plane: mirrored back through it
+        p-=2.*g*f.xyz;
+        N-=2.*cn*f.xyz;
+      }
+    }
+  }
   return p;
 }`;
 
@@ -365,9 +411,14 @@ export function createStudio(opts: {
     pull: { value: 0 },
     hole: { value: new Vector3(0, 0, VANISH_Z) },
     jit: { value: new Vector3() },
-    crumple: { value: 0 },
+    fold: { value: Array.from({ length: FOLDS }, () => new Vector4(0, 0, 1, 99)) },
+    ridge: { value: Array.from({ length: RIDGES }, () => new Vector4(0, 0, 1, 0)) },
+    ridgeA: { value: Array.from({ length: RIDGES }, () => new Vector3(0, 0, 0)) },
+    lit: { value: 0 },
+    core: { value: 0 },
     page: { value: new Vector2(1, 1) },
     ballR: { value: 0.2 },
+    eps: { value: 0.005 },
     flat: { value: 1 },
     paper: { value: new Color("#dccdb0") },
   };
@@ -706,40 +757,102 @@ vec3 spin(vec3 p,vec3 ax,float a){float s=sin(a),c=cos(a);return p*c+cross(ax,p)
   }
 
   /* ── The paper ── */
-  const sheetGeo = keep(new PlaneGeometry(1, 1, small ? 110 : 224, small ? 170 : 144));
+  // A fine grid, so a crease is never more than a hair wide.
+  const GRID = small ? [210, 420] : [400, 250];
+  const sheetGeo = keep(new PlaneGeometry(1, 1, GRID[0], GRID[1]));
   const paperTooth = keep(paperNormal());
+  // The cage: planes pointing every way, each with its own final distance
+  // (so the ball is irregular), none lying in the plane of the sheet (that
+  // would fold the paper flat onto itself).
+  const cage = (() => {
+    const out: { n: Vector3; d: number; a: number; b: number }[] = [];
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let k = 0; k < FOLDS; k++) {
+      const y = 1 - (2 * (k + 0.5)) / FOLDS;
+      const r = Math.sqrt(1 - y * y);
+      const th = k * golden + rnd(k * 3.3) * 0.9;
+      const n = new Vector3(
+        Math.cos(th) * r + (rnd(k * 5.1 + 1) - 0.5) * 0.35,
+        Math.sin(th) * r + (rnd(k * 7.7 + 2) - 0.5) * 0.35,
+        y + (rnd(k * 9.3 + 3) - 0.5) * 0.35
+      );
+      if (Math.abs(n.z) < 0.3) n.z = (n.z < 0 ? -1 : 1) * (0.3 + 0.25 * rnd(k * 2.9 + 5));
+      n.normalize();
+      out.push({ n, d: 0.7 + 0.3 * rnd(k * 4.1 + 7), a: 0.26 * rnd(k * 6.3 + 9), b: 0.74 + 0.26 * rnd(k * 8.7 + 11) });
+    }
+    // not in any spatial order
+    return out.map((p, i) => ({ p, key: rnd(i * 12.7 + 4) })).sort((x, y) => x.key - y.key).map((x) => x.p);
+  })();
+  // The first buckles: straight ridges across the sheet, up and down by turns.
+  const ridges = Array.from({ length: RIDGES }, (_, j) => ({
+    x: rnd(j * 3.7 + 20) - 0.5,
+    y: rnd(j * 5.3 + 21) - 0.5,
+    ang: rnd(j * 7.9 + 22) * Math.PI,
+    amp: (j % 2 ? -1 : 1) * (0.5 + 0.5 * rnd(j * 2.3 + 23)),
+    width: 0.1 + 0.16 * rnd(j * 9.1 + 24),
+    at: 0.02 + 0.2 * rnd(j * 4.9 + 25),
+  }));
   const sheetMat = film(
     keep(
       new MeshStandardMaterial({
         // a stand-in until the page is painted, so the program is built with
         // a map from the start and swapping the picture in costs nothing
         map: keep(new CanvasTexture(canvasOf(2, 2))),
-        roughness: 0.94,
+        roughness: 0.96,
         metalness: 0,
         side: DoubleSide,
+        // every facet is one flat plane and catches the light on its own
+        flatShading: true,
         normalMap: paperTooth,
-        normalScale: new Vector2(0.22, 0.22),
+        normalScale: new Vector2(0.14, 0.14),
+        envMapIntensity: 0.6,
       })
     ),
     "paper",
     (sh) => {
-      Object.assign(sh.uniforms, { uC: U.crumple, uPage: U.page, uR: U.ballR, uFlat: U.flat, uPaperC: U.paper });
+      Object.assign(sh.uniforms, {
+        uPage: U.page,
+        uR: U.ballR,
+        uEps: U.eps,
+        uFold: U.fold,
+        uRidge: U.ridge,
+        uRidgeA: U.ridgeA,
+        uFlat: U.flat,
+        uPaperC: U.paper,
+        uLit: U.lit,
+        uCore: U.core,
+      });
       sh.vertexShader = sh.vertexShader
         .replace("#include <common>", "#include <common>\n" + PAPER_VERT)
-        .replace(
-          "#include <beginnormal_vertex>",
-          `vec3 cp=crumple(uv);
-  vec3 cdu=crumple(uv+vec2(.004,0.))-cp;
-  vec3 cdv=crumple(uv+vec2(0.,.004))-cp;
-  vec3 objectNormal=normalize(cross(cdu,cdv));`
-        )
-        .replace("#include <begin_vertex>", "vec3 transformed=cp;");
+        .replace("#include <begin_vertex>", "vec3 transformed=crumple(uv);\nvCore=length(transformed)/uR;")
+        // (the sheet is a hair over the screen; the picture still maps one texel to one pixel)
+        .replace("#include <uv_vertex>", "#include <uv_vertex>\n#ifdef USE_MAP\nvMapUv=(uv-.5)*1.004+.5;\n#endif");
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nuniform float uFlat;\nuniform vec3 uPaperC;")
-        // the back of the sheet is blank
-        .replace("#include <map_fragment>", "#include <map_fragment>\nif(!gl_FrontFacing) diffuseColor.rgb=uPaperC*.9;")
-        // At rest it is the page exactly as the browser drew it; the room's
-        // light takes over as it starts to fold.
+        .replace(
+          "#include <common>",
+          "#include <common>\nuniform float uFlat;\nuniform vec3 uPaperC;\nuniform float uLit;\nuniform float uCore;\nvarying float vCore;"
+        )
+        // the back of the sheet is blank paper
+        .replace("#include <map_fragment>", "#include <map_fragment>\nif(!gl_FrontFacing) diffuseColor.rgb=uPaperC*.96;")
+        // The paper's own key light: high, to the left, in front. Facets that
+        // face it are bright, facets that turn away fall off quickly, and a
+        // facet lit from behind lets a little of it through, as thin paper does.
+        .replace(
+          "#include <lights_fragment_end>",
+          `#include <lights_fragment_end>
+  {
+    float nk=dot(normal,normalize(vec3(-.52,.62,.59)));
+    vec3 key=vec3(1.,.93,.84)*uLit;
+    reflectedLight.directDiffuse+=diffuseColor.rgb*RECIPROCAL_PI*key*(max(nk,0.)+.2*max(-nk,0.));
+  }`
+        )
+        // Deep inside the wad little light gets in.
+        .replace(
+          "#include <opaque_fragment>",
+          "outgoingLight*=mix(1.,.3+.7*smoothstep(.2,.95,vCore),uCore);\n#include <opaque_fragment>"
+        )
+        // At rest it is the page exactly as the browser drew it; the light
+        // takes over as it starts to fold.
         .replace(
           "#include <colorspace_fragment>",
           `#include <colorspace_fragment>
@@ -747,9 +860,19 @@ vec3 spin(vec3 p,vec3 ax,float a){float s=sin(a),c=cos(a);return p*c+cross(ax,p)
     gl_FragColor.rgb=mix(gl_FragColor.rgb,linearToOutputTexel(vec4(texture2D(map,vMapUv).rgb,1.)).rgb,uFlat);
   #endif`
         );
-    }
+    },
+    paperExposure
   );
   const sheet = new Mesh(sheetGeo, sheetMat);
+  // The inside of the wad. A crumpled ball is paper all the way through, so
+  // wherever a gap between the outer folds lets you see in, there is more
+  // paper there, in shadow: a small faceted lump of it, riding inside.
+  const core = new Mesh(
+    keep(new IcosahedronGeometry(1, 1)),
+    film(keep(new MeshStandardMaterial({ color: 0x6f6654, roughness: 1, metalness: 0, flatShading: true })), "core", undefined, paperExposure)
+  );
+  core.visible = false;
+  sheet.add(core);
   sheet.frustumCulled = false;
   sheet.visible = false;
   group.add(sheet);
@@ -887,10 +1010,6 @@ void main(){
     fill.position.set(aspect < 0.8 ? -0.9 : -1.7, 1.3, CAM_START + 0.9);
     dustU.uLamp.value.copy(headWorld).add(new Vector3(0, -0.2, 0));
 
-    // The page hangs PAGE_DIST in front of the camera's first position and
-    // exactly fills the view.
-    const ph = 2 * PAGE_DIST * Math.tan((fov * Math.PI) / 360);
-    U.page.value.set(ph * aspect, ph);
     U.ballR.value = aspect < 0.8 ? 0.25 : 0.24;
   };
 
@@ -924,6 +1043,7 @@ void main(){
   let toss = 0; // the throw's own clock, 0 to 1
   let thrown = false;
   const spinAxis = new Vector3(0.6, 0.3, -0.74).normalize();
+  const turnAxis = new Vector3(0.35, 0.9, 0.2).normalize();
   const q0 = new Quaternion();
   const q1 = new Quaternion();
   const vanish = new Vector3(0, 0, VANISH_Z);
@@ -934,30 +1054,68 @@ void main(){
    * Put the whole room at `v`. `dt` advances the throw; `stir` (0 to 1) is
    * how hard the page is being scrolled, which is all the shake listens to.
    */
-  const update = (v: number, time: number, dt: number, stir: number) => {
+  const update = (v: number, time: number, dt: number, stir: number, aspect: number) => {
     const R = room!;
-    /* crumple */
-    const c = smooth(T.crumple[0], T.crumple[1], v);
-    U.crumple.value = c;
-    U.flat.value = 1 - smooth(0.0, 0.14, c);
+    /* The page hangs PAGE_DIST in front of the camera's first position and
+       exactly fills the view, whatever shape the window is right now. (A hair
+       over, so no edge pixel can be left uncovered.) */
+    const ph = 2 * PAGE_DIST * Math.tan((cam.fov * Math.PI) / 360);
+    const pw = ph * aspect;
+    U.page.value.set(pw, ph);
+
+    /* crumple: close the cage */
+    const c = ramp(T.crumple[0], T.crumple[1], v);
+    const ballR = U.ballR.value;
+    const reach = 0.5 * Math.hypot(pw, ph);
+    U.eps.value = 0.55 * Math.hypot(pw / GRID[0], ph / GRID[1]);
+    cage.forEach((pl, k) => {
+      // where this plane starts: just clear of the flat sheet
+      const far = 2.2 * U.eps.value + 1.01 * Math.max((Math.abs(pl.n.x) * pw + Math.abs(pl.n.y) * ph) / 2, reach * 0.5);
+      const e = smooth(pl.a, pl.b, c);
+      U.fold.value[k].set(pl.n.x, pl.n.y, pl.n.z, far + (pl.d * ballR - far) * e);
+    });
+    ridges.forEach((rg, j) => {
+      U.ridge.value[j].set(rg.x * pw, rg.y * ph, Math.cos(rg.ang), Math.sin(rg.ang));
+      const w = rg.width * ph;
+      // they come up one after another, then are lost in the folding
+      const amp = rg.amp * 0.32 * smooth(rg.at, rg.at + 0.22, c);
+      // (no gathering while the ridge is not there: the flat page stays exact)
+      U.ridgeA.value[j].set(amp, w, U.eps.value * Math.min(1, Math.abs(amp) * 60));
+    });
+    U.flat.value = 1 - smooth(0.03, 0.13, c);
+    U.core.value = smooth(0.35, 0.95, c);
+
+    /* the room: dark, and not drawn, until the page is a ball */
+    const reveal = smooth(T.reveal[0], T.reveal[1], v);
+    exposure.value = reveal;
+    const shown = reveal > 0;
+    if (wall) wall.visible = shown;
+    if (floorMesh) floorMesh.visible = shown;
+    picGroup.visible = lamp.visible = bin.visible = shown;
+    // the paper's key light gives way to the lamp once it is thrown
+    U.lit.value = 3.4 * (1 - 0.72 * smooth(0, 0.3, toss));
 
     /* the throw: it plays in real time once it is let go, either way */
     if (!thrown && v > T.toss) thrown = true;
     else if (thrown && v < T.toss - 0.025) thrown = false;
     const goal = thrown ? 1 : 0;
     // far ahead of it (a fast scroll)? hurry up
-    const hurry = v > T.pull[0] || v < T.crumple[1] - 0.06 ? 5 : 1;
+    const hurry = v > T.pull[0] || v < T.crumple[1] - 0.03 ? 5 : 1;
     const step = (dt / 1.55) * hurry;
     toss = goal > toss ? Math.min(goal, toss + step) : Math.max(goal, toss - step);
 
     tossAt(toss, sheet.position);
     const turns = toss < 0.5 ? toss * 7 : 3.5 + (toss - 0.5) * 3.2;
     sheet.quaternion.setFromAxisAngle(spinAxis, toss <= 0 ? 0 : turns * (1 - 0.6 * smooth(0.9, 1, toss)));
+    // as it closes, the wad turns a little in the hand
+    sheet.quaternion.multiply(q1.setFromAxisAngle(turnAxis, 0.85 * smooth(0.45, 1, c)));
     const propsQ = smooth(T.props[0], T.props[1], v);
     sheet.visible = propsQ < 0.03 && v < 0.999;
-    shadowBall.visible = sheet.visible && c > 0.7;
+    shadowBall.visible = sheet.visible && shown;
     shadowBall.position.copy(sheet.position);
     shadowBall.scale.setScalar(U.ballR.value * 0.95);
+    core.visible = c > 0.8;
+    core.scale.setScalar(U.ballR.value * 0.62 * smooth(0.8, 1, c));
 
     /* shake */
     const env = smooth(T.shake[0], T.shake[1], v) * (1 - smooth(T.shake[2], T.shake[3], v));
@@ -1010,11 +1168,11 @@ void main(){
     }
 
     dustU.uTime.value = time;
-    dustU.uAmount.value = (0.25 + 0.75 * env) * smooth(T.camera[0], T.camera[1], v) * pool;
+    dustU.uAmount.value = (0.25 + 0.75 * env) * reveal * pool;
     dustU.uSize.value = renderer.getDrawingBufferSize(new Vector2()).y * 0.012;
 
-    wall!.visible = floorMesh!.visible = U.pull.value < 1;
-    dust.visible = dustU.uAmount.value > 0.002;
+    wall!.visible = floorMesh!.visible = shown && U.pull.value < 1;
+    dust.visible = shown && dustU.uAmount.value > 0.002;
     glass.opacity = 0.55 * pool;
   };
 
@@ -1039,7 +1197,7 @@ void main(){
       const ball = Math.max(0.6, camZ - sheet.position.z);
       const wallD = camZ - WALL_Z;
       const d = toss >= 1 ? wallD : ball + (wallD - ball) * smooth(0.5, 1, toss) * 0.999;
-      return { distance: d, amount: 1 - smooth(T.dof[0], T.dof[1], v) };
+      return { distance: d, amount: smooth(T.reveal[0], T.reveal[1], v) * (1 - smooth(T.dof[0], T.dof[1], v)) };
     },
     /** How far picture `i` is along its glide to the tunnel. */
     glide(v: number, p: Pic) {

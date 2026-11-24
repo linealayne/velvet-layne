@@ -107,11 +107,32 @@ export default function Hero() {
       // single hover is answered.
       const shown = (i: number) => {
         nodes[i].dataset.lit = String(Number(nodes[i].dataset.lit || 0) + 1);
+        // Only now does the letter react: it opens (on phones) and gets its
+        // kick as the scene cuts in. Before this the kick played on a hover
+        // whether or not there was a scene to go with it, and for the first
+        // seconds after a load there was not.
+        if (nodes[i].classList.contains("is-on")) return;
+        nodes[i].classList.add("is-on");
+        if (moving) {
+          nodes[i].classList.remove("kick");
+          void nodes[i].offsetWidth;
+          nodes[i].classList.add("kick");
+        }
+      };
+
+      // Every letter's scene is compiled. `ms` is how long that took from
+      // the moment it was asked for (read by scripts/cold.mjs-style tests).
+      let warmed = false;
+      const onWarmed: (() => void)[] = [];
+      const warmDone = (ms: number) => {
+        document.documentElement.dataset.letters = String(ms);
+        warmed = true;
+        onWarmed.forEach((fn) => fn());
       };
 
       const loadLocal = () =>
         (localLoading ??= import("@/lib/letterEngine").then(({ createEngine }) => {
-          local = createEngine(options, idle, shown);
+          local = createEngine(options, idle, shown, warmDone);
         }));
 
       // The worker failed or never answered: drop it and run the engine here.
@@ -144,6 +165,7 @@ export default function Hero() {
             worker.onmessage = (e: MessageEvent<FromWorker>) => {
               if (e.data.type === "ready") window.clearTimeout(watchdog);
               else if (e.data.type === "lit") shown(e.data.i);
+              else if (e.data.type === "warm") warmDone(e.data.ms);
               else idle(e.data.i);
             };
             worker.onerror = () => void abandonWorker();
@@ -201,15 +223,11 @@ export default function Hero() {
         if (pending) await pending;
         if (!lit[i] || locked) return;
         ensure(i);
-        if (!nodes[i].classList.contains("is-on")) {
-          send({ type: "size", i, ...sizeOf(i) });
-          nodes[i].classList.add("is-on");
-          if (moving) {
-            nodes[i].classList.remove("kick");
-            void nodes[i].offsetWidth;
-            nodes[i].classList.add("kick");
-          }
-        }
+        // The engine answers with `lit` when the scene is really on screen
+        // (at once if its shader is ready, otherwise the moment it is, as long
+        // as the letter is still wanted). The letter's own reaction waits for
+        // that: see `shown`.
+        if (!nodes[i].classList.contains("is-on")) send({ type: "size", i, ...sizeOf(i) });
         send({ type: "on", i });
       };
 
@@ -232,10 +250,17 @@ export default function Hero() {
           activate(i);
           window.setTimeout(() => release(i), 1900);
         };
+        // A pointer that was already resting on the letter when the page
+        // woke up never "enters" it: the first move counts too.
+        const move = (e: PointerEvent) => {
+          if (e.pointerType !== "touch" && !lit[i]) activate(i);
+        };
+        node.addEventListener("pointermove", move);
         node.addEventListener("pointerenter", enter);
         node.addEventListener("pointerleave", leave);
         node.addEventListener("pointerdown", tap);
         cleanups.push(() => {
+          node.removeEventListener("pointermove", move);
           node.removeEventListener("pointerenter", enter);
           node.removeEventListener("pointerleave", leave);
           node.removeEventListener("pointerdown", tap);
@@ -250,14 +275,18 @@ export default function Hero() {
       ro.observe(el.querySelector(".name")!);
       cleanups.push(() => ro.disconnect());
 
-      // Start the engine and compile the letter shader ahead of the first
-      // letter, once the page has settled.
-      const warm = window.setTimeout(async () => {
+      // Start the engine and compile every letter's shader straight away, so
+      // the scenes are ready before most people have moved the mouse. (This
+      // used to wait two seconds and then compile them one after another.)
+      let stopped = false;
+      cleanups.push(() => {
+        stopped = true;
+      });
+      (async () => {
         const pending = boot();
         if (pending) await pending;
-        send({ type: "warm" });
-      }, 2000);
-      cleanups.push(() => window.clearTimeout(warm));
+        if (!stopped) send({ type: "warm" });
+      })();
 
       // Touch screens have no hover, so the letters take turns on their own.
       if (coarse && moving) {
@@ -274,8 +303,19 @@ export default function Hero() {
           activate(i);
           window.setTimeout(() => release(i), 1500);
         };
-        const first = window.setTimeout(next, 3200);
-        const id = window.setInterval(next, 2300);
+        // The letters only start taking turns once their scenes are ready
+        // (and not before the name has arrived).
+        let first = 0;
+        let id = 0;
+        const born = performance.now();
+        const begin = () => {
+          first = window.setTimeout(() => {
+            next();
+            id = window.setInterval(next, 2300);
+          }, Math.max(0, 3200 - (performance.now() - born)));
+        };
+        if (warmed) begin();
+        else onWarmed.push(begin);
         cleanups.push(() => {
           window.clearTimeout(first);
           window.clearInterval(id);

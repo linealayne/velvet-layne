@@ -41,6 +41,7 @@ node scripts/v4.mjs [url] [outDir] [run]         # velvet, pillar handoff, trace
 node scripts/v5.mjs [url] [outDir] [run] [part]  # letters, molten-to-velvet
 node scripts/v6.mjs [url] [outDir] [run] [part]  # hero on load/refresh (its suction and mid-page parts are historical)
 node scripts/v7.mjs [url] [outDir] [run] [part]  # the "4" screen, the studio sequence, rebuilt letters, refresh to top, frame rate
+node scripts/v8.mjs [url] [outDir] [run] [part]  # cold-load first hover, the handoff, the paper crumple, reverse, frame rate
 node scripts/hover.mjs [url] [sweeps] [engine]   # the hover test: every letter must answer every hover
 node scripts/studio-assets.mjs                   # re-fetch and compress the studio's Poly Haven textures
 ```
@@ -167,6 +168,21 @@ How it works:
     stand-in (a sliding reflection strip) while the shared shader was still
     compiling, then swapped to the real shader scene as soon as it was ready,
     in the middle of an activation. No letter can do that now.
+- **Ready on the very first hover.** All eleven shaders start compiling the
+  moment the hero wakes up (it used to wait two seconds and then compile
+  them one after another, so for the first several seconds a hover found no
+  scene). With `KHR_parallel_shader_compile` they are all handed to the
+  driver at once; without it (WebKit) they go one per task. Each is drawn
+  once, tiny, as soon as it links, so nothing is left to build on first use.
+  About 1.7s for all eleven on this laptop.
+  - A letter's own reaction (the kick, and opening wider on phones) now
+    happens when the engine reports the scene is on screen (`shown()` in
+    `Hero.tsx`), not when the pointer arrives. A hover made before a scene is
+    ready is held and plays the moment it is, if the pointer is still there.
+    Never a kick on its own, never a stand-in scene.
+  - A pointer already resting on a letter when the page wakes counts on its
+    first move. The phone auto-cycle starts only once the scenes are ready.
+  - `scripts/v8.mjs cold` checks it on fresh, uncached loads.
 - **Every hover is answered (the dead-letter bug).** A scene wipes in, plays,
   holds for half a second after the pointer leaves, then wipes out. The old
   engine ignored a new hover that arrived during the wipe-out: it finished
@@ -244,8 +260,8 @@ everything in it is a function of one number, `corridorState.vac` (`v`, 0 to
 
 | v | Beat | What happens |
 |---|------|--------------|
-| 0 - 0.24 | Crumple | The page (a finely divided sheet carrying the picture from `lib/pageTexture.ts`) wrinkles, then gathers round a ball. Vertex shader: `crumple()`. |
-| 0.15 - 0.34 | Pull back | The camera draws back from 2.6 units closer; the room is there. |
+| 0 - 0.21 | Crumple | The page (a finely divided sheet carrying the picture from `lib/pageTexture.ts`) is folded up into a ball, as paper. Nothing else is drawn: it is dark behind. Vertex shader: `crumple()`. |
+| 0.19 - 0.34 | Pull back | The room's lights come up (`T.reveal`) and the camera draws back from 2.6 units closer, the ball hanging there. |
 | 0.33 | The throw | Wind-up, arc, the wall, the rim of the bin (which rattles once), the bin. |
 | 0.40 - 0.92 | Shake | Lamp swings and flickers, frames rattle on their nails, bricks jitter, more dust. |
 | 0.54 - 0.86 | Suction | The wall leaves brick by brick from the centre outward, then the floor boards. |
@@ -260,12 +276,61 @@ everything in it is a function of one number, `corridorState.vac` (`v`, 0 to
   shorter window cut off the "4", the heading and the top of the plate, and
   left a seam where the copy met the real page. On short windows the plate
   gets narrower rather than being cut.
-- **The paper.** A `MeshStandardMaterial` whose vertex stage is replaced by
-  `crumple(uv)`: wrinkles first (soft ridged noise at four sizes that shifts
-  as the sheet closes, so it ripples), then the sheet is wrapped round a
-  ball, edges meeting at the back, with lumps. Normals come from the same
-  function, so the folds are properly lit. At rest it shows the page exactly
-  as the browser drew it (`uFlat`); the room's light takes over as it folds.
+- **The paper is folded, never bent (do not go back to noise).** v7 pushed
+  the sheet around with smooth noise and wrapped it round a sphere; it looked
+  like clay. Paper does not stretch or curve: it only folds, along straight
+  lines. So `crumple()` does only that:
+  - The sheet sits inside a cage of 24 planes (`FOLDS`) pointing every way,
+    closing in on it. Whatever is outside a plane is **mirrored back through
+    it**. A mirror is a rigid move and the points on the plane stay put, so
+    each plane leaves a perfectly straight crease, the pieces either side
+    stay perfectly flat, and nothing changes size. Two passes over the
+    planes bring every point inside.
+  - The planes reach the corners and edges first, so those fold in first; the
+    creases multiply as the cage shrinks; closed to the size of a fist, the
+    sheet is a tight wad of flat facets with a jagged outline. Each plane has
+    its own final distance and its own timing, so the ball is irregular.
+  - Before that, nine shallow straight ridges buckle up across the sheet.
+  - At `v = 0` every plane is clear of the sheet: it is exactly the flat page.
+  - **Creases are snapped to.** A grid cannot follow a crease exactly; a
+    triangle that straddles one cuts the corner and a row of them is a
+    sawtooth. Each vertex carries the normal of the facet it is on (`N`,
+    mirrored along with it), and vertices within half a grid cell of a crease
+    are slid onto it *within their own facet* (`gather()`). Facets stay true
+    planes and crease lines stay straight.
+  - **Shading.** `flatShading`, so each facet is one plane and catches the
+    light on its own. The paper has its own key light in its shader (high,
+    left, in front), with a little of it let through from behind, a fine
+    tooth normal map, and it gets darker toward the middle of the wad. Not
+    glossy. A small faceted lump of shadowed paper (`core`) rides inside the
+    ball so that gaps between the outer folds show paper, not the room.
+  - The sheet is 400 x 250 on desktop and 210 x 420 on phones. No outside
+    texture was used for the paper.
+- **The handoff from the DOM page (the v7 flash, and how it is kept exact).**
+  - *Cause of the flash.* v7's crumple divided the sheet's radius by an angle
+    that is exactly zero for the first 4% of the sequence. The whole sheet
+    collapsed to a single point, so for those frames the page was simply
+    gone and the lit studio behind it showed; then it popped back and began
+    to crumple. The fold model has no such case.
+  - *Nothing of the room exists yet.* The wall, floor, frames, lamp, bin and
+    dust are not drawn at all until `T.reveal` (0.19), and their exposure
+    then comes up from black. There is no depth of field until then either,
+    so the sheet is drawn straight to the screen.
+  - *Same picture.* The page texture is painted at exactly the 3D canvas's
+    pixel ratio, the flat sheet fills the view for the window's shape *this
+    frame* (it used to be sized at layout, which could be a few pixels out),
+    and while flat it outputs the texture untouched by lighting (`uFlat`).
+    The DOM copy (`.vac-page`) is turned by 0.0001 degrees, which moves
+    nothing but makes the browser smooth its text the plain way, as the
+    canvas does, instead of with coloured sub-pixels.
+  - *Measured* (`scripts/v8.mjs handoff`, desktop Chrome): position, size and
+    content identical; 95.6% of pixels bit-identical, 99.2% within 8/255, the
+    rest hairline edge smoothing on the plate's stripes and the "4". On a
+    phone the 3D canvas is capped at 1.5x, below the screen's 3x, so the
+    sheet is softer than the DOM page there.
+  - `.cor-stage.is-3d` puts a 2px black line above the stage while the 3D
+    scene shows, covering a sub-pixel sliver of Editorial that a sticky box
+    can leave.
 - **The throw runs on its own clock.** Once `v` passes 0.33 it plays in real
   time (about 1.5s) and plays backwards if `v` drops back, so it reads as a
   throw however slowly the page is scrolled. A fast scroll hurries it.

@@ -668,6 +668,12 @@ html.anim .cor-stage:not(.is-set) {
 html.anim .cor-stage:not(.is-set) > * {
   visibility: hidden;
 }
+/* While the 3D scene is showing, a hairline of black sits just above the
+   stage. A sticky box lands on whole pixels and the page under it does not, so
+   without this the row of pixels above it can show a sliver of Editorial. */
+html.anim .cor-stage.is-3d {
+  box-shadow: 0 -2px 0 #000;
+}
 /* Reduced motion: a still of the studio wall sits between the "4" screen and
    the still tunnel. It is a picture taken from the same scene. */
 .studio-still {
@@ -731,7 +737,14 @@ html.anim .cor-stage {
 .vac-page {
   display: none;
 }
+/* The copy is turned by a ten-thousandth of a degree. Nothing moves (a
+   four-hundredth of a pixel at the far edge), but it makes the browser smooth
+   its text the plain way instead of with coloured sub-pixels, which is how the
+   3D sheet that takes over from it is drawn. Without this the swap from one to
+   the other shows as a faint change in every letter. */
 html.anim .vac-page {
+  transform: rotate(0.0001deg);
+  backface-visibility: hidden;
   display: block;
   position: absolute;
   inset: 0;

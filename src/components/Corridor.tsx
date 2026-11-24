@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { gsap, useStage, motionOn, isSmall } from "@/lib/gsap";
+import { gsap, useStage, motionOn } from "@/lib/gsap";
 import { preloadCorridor } from "@/lib/corridorAssets";
 import { corridorState } from "@/lib/corridorState";
 import { drawEditorialPage, preparePlates } from "@/lib/pageTexture";
@@ -86,7 +86,7 @@ export default function Corridor() {
     let active = -1;
 
     // Take the page as Editorial shows it right now: once as real DOM for the
-    // handover, once as a picture for the ribbons.
+    // handover, once as a picture for the sheet of paper.
     const capture = () => {
       const source = document.querySelector("section.editorial .ed-steps");
       if (!source) return;
@@ -96,7 +96,9 @@ export default function Corridor() {
       slot.replaceChildren(clone);
       stage.classList.add("is-set");
       const canvas = (corridorState.page ??= document.createElement("canvas"));
-      const scale = Math.min(window.devicePixelRatio || 1, isSmall() ? 1.5 : 1.25);
+      // One texel per pixel of the 3D canvas (whose pixel ratio is capped at
+      // 1.5 in CorridorScene), so the flat sheet reproduces this picture exactly.
+      const scale = Math.min(window.devicePixelRatio || 1, 1.5);
       if (drawEditorialPage(canvas, stage.clientWidth, stage.clientHeight, scale)) corridorState.pageVersion++;
     };
 
@@ -113,6 +115,8 @@ export default function Corridor() {
         // The paper is the page from the first movement on.
         page.style.visibility = p < 0.004 ? "visible" : "hidden";
         page.style.opacity = "1";
+        // (marks the stage as showing the 3D scene: see .is-3d in globals.css)
+        stage.classList.toggle("is-3d", p >= 0.004);
       } else {
         // No WebGL: the page simply sinks into the dark.
         page.style.visibility = p < 0.6 ? "visible" : "hidden";

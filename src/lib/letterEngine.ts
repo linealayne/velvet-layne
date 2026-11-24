@@ -52,7 +52,9 @@ export function createEngine(
   options: EngineOptions,
   onIdle: (i: number) => void,
   /** Called once per `on`, when that request has put the scene on screen. */
-  onLit: (i: number) => void = () => {}
+  onLit: (i: number) => void = () => {},
+  /** Called when every letter's scene is compiled and ready, with the time it took. */
+  onWarm: (ms: number) => void = () => {}
 ) {
   const { moving, coarse } = options;
   const letters: (Letter | undefined)[] = [];
@@ -203,11 +205,11 @@ export function createEngine(
           L.waiting = true;
           const poll = () => {
             if (!L.wanted) return void (L.waiting = false);
-            if (L.scene.ready && !L.scene.ready()) return void setTimeout(poll, 40);
+            if (L.scene.ready && !L.scene.ready()) return void setTimeout(poll, 16);
             L.waiting = false;
             this.on(i);
           };
-          setTimeout(poll, 40);
+          setTimeout(poll, 16);
         }
         return;
       }
@@ -246,9 +248,9 @@ export function createEngine(
       L.ctx.setTransform(1, 0, 0, 1, 0, 0);
       L.ctx.clearRect(0, 0, L.canvas.width, L.canvas.height);
     },
-    /** Compile the chrome shader ahead of the first hover. */
+    /** Compile every letter's shader ahead of the first hover. */
     warm() {
-      warmShader();
+      warmShader(onWarm);
     },
   };
 }

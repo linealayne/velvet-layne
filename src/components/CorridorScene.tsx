@@ -456,6 +456,7 @@ export default function CorridorScene() {
           pageTex = new CanvasTexture(corridorState.page);
           pageTex.colorSpace = SRGBColorSpace;
           pageTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+          renderer.initTexture(pageTex);
           studio.setPage(pageTex);
           corridorState.sheet = true;
         }
@@ -502,7 +503,7 @@ export default function CorridorScene() {
 
         if (inStudio && studio) {
           studio.group.visible = true;
-          studio.update(vac, clock, dt, moving ? stir : 0);
+          studio.update(vac, clock, dt, moving ? stir : 0, camera.aspect);
           // Which panel each picture flies to is settled once per pass.
           const inGlide = vac >= T.glide - 0.03;
           if (inGlide && !targets.size) assign(lastVac >= 1);
@@ -619,6 +620,7 @@ export default function CorridorScene() {
       // the ball in the air and in the bin, and with the pictures in flight.
       if (studio) {
         const states: [dt: number, v: number, plain: boolean][] = [
+          [0, 0.1, true],
           [0, 0.3, false],
           [0, 0.3, true],
           [60, 0.45, false],

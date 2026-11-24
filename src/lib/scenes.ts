@@ -642,6 +642,14 @@ function compile(kind: number, done?: () => void) {
     } else {
       entry.uRes = gl.getUniformLocation(prog, "uRes");
       entry.uTime = gl.getUniformLocation(prog, "uTime");
+      // Draw one small frame with it now. Some drivers only finish building
+      // a program the first time it is used, and that must not land on the
+      // first frame of a hover.
+      gl.useProgram(prog);
+      gl.viewport(0, 0, 16, 16);
+      gl.uniform2f(entry.uRes, 16, 16);
+      gl.uniform1f(entry.uTime, 1);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
       entry.ready = true;
     }
     done?.();
@@ -651,16 +659,35 @@ function compile(kind: number, done?: () => void) {
 }
 
 /**
- * Compile every letter's program, one after another, in the background.
- * Called once the page has settled so the first hover finds its scene ready.
+ * Compile every letter's program in the background, starting the moment the
+ * page loads, so a scene is ready before most people have moved the mouse.
+ * `done` gets how long it took, in ms.
  */
-export function warmShader() {
-  let kind = 0;
-  const step = () => {
-    if (kind >= LETTER_KINDS) return;
-    compile(kind++, () => setTimeout(step, 30));
+export function warmShader(done?: (ms: number) => void) {
+  const t0 = performance.now();
+  const s = context();
+  if (!s) return done?.(0);
+  let left = LETTER_KINDS;
+  const one = () => {
+    if (--left === 0) done?.(Math.round(performance.now() - t0));
   };
-  step();
+  if (s.gl.getExtension("KHR_parallel_shader_compile")) {
+    // All eleven at once: the driver compiles them side by side on its own
+    // threads and nothing here waits for it.
+    for (let kind = 0; kind < LETTER_KINDS; kind++) compile(kind, one);
+  } else {
+    // No parallel compile (WebKit): asking whether a program has linked
+    // blocks until it has, so they go one per task and the page stays alive.
+    let kind = 0;
+    const step = () => {
+      if (kind >= LETTER_KINDS) return;
+      compile(kind++, () => {
+        one();
+        setTimeout(step, 0);
+      });
+    };
+    step();
+  }
 }
 
 /**
